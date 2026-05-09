@@ -330,8 +330,8 @@ class Pilot():
         if self.isOff():
             return "off"
 
-        # If temp is set, show temparature and ignore RGB values (since they are not relevant in white mode)
-        if self.temp and not (self.red or self.green or self.blue):
+        # If temp is set, show temperature and ignore RGB values (since they are not relevant in white mode)
+        if self.temp and not (self.r or self.g or self.b):
             return f"temperature ({self.temp})"
 
         r = int(self.r & 0xFF)
@@ -509,6 +509,9 @@ class Alias():
 
         self.aliases: 'dict[str,str]' = dict()
         try:
+            # Determine the user home directory differently on Windows and POSIX.
+            # This allows the alias file to be loaded from %USERPROFILE% on Windows
+            # or $HOME on Linux/macOS.
             filename = os.path.join(os.environ['USERPROFILE'] if os.name == "nt" else os.environ['HOME']
                                     if "HOME" in os.environ else "~", Alias._KNOWN_DEVICES_FILE)
 
@@ -528,7 +531,7 @@ class Alias():
 
         if re.match(Alias.IP_PATTERN, label):
             if label:
-                return [label]
+                return {label}
             else:
                 return None
 
@@ -537,7 +540,7 @@ class Alias():
                 broadcast_address="255.255.255.255")
             ip_addresses = {
                 d.ip_address for d in devices if d.mac and d.formatted_mac() == label.upper()}
-            return ip_addresses[0] if ip_addresses else None
+            return ip_addresses if ip_addresses else None
 
         else:
             ip_addresses = {alias
@@ -666,13 +669,19 @@ class WizDeviceController():
         if scene.isdigit():
             sceneId = int(scene)
         else:
-            name = scene.capitalize()
-            if name == Pilot.SCENES_LIST[-2]:
+            normalized_scene = scene.strip().lower().replace("-", " ")
+            scene_map = {
+                s.lower(): i
+                for i, s in enumerate(Pilot.SCENES_LIST)
+            }
+            if normalized_scene in scene_map:
+                sceneId = scene_map[normalized_scene]
+            elif normalized_scene == "dim to warm":
                 sceneId = Pilot.SCENE_DIM_TO_WARM
-            elif name == Pilot.SCENES_LIST[-1]:
+            elif normalized_scene == "rhythm":
                 sceneId = Pilot.SCENE_RHYTHM
             else:
-                sceneId = Pilot.SCENES_LIST.index(name)
+                raise WizDeviceException(f"Unknown scene '{scene}'")
 
         self.setPilot(properties={"sceneId": sceneId})
 
@@ -682,12 +691,12 @@ class WizDeviceController():
 
     def perform(self) -> None:
 
-        def _request(ip_address: str, payload: dict[str, str | int | dict[str, str | int]]):
+        UDP_PORT = 38899
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(.5)
 
-            UDP_PORT = 38899
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.settimeout(.5)
+        def _request(ip_address: str, payload: dict[str, str | int | dict[str, str | int]]):
 
             LOGGER.debug(
                 f">>> Sending message {payload} to {ip_address}:{UDP_PORT}")
@@ -708,37 +717,37 @@ class WizDeviceController():
                 LOGGER.error(f"Error during communication: {e}")
                 response = {"error": f"Error during communication: {e}"}
 
-            finally:
-                sock.close()
-
             return response
 
-        for device in self.devices:
+        try:
+            for device in self.devices:
+                for command in self.commands:
 
-            for command in self.commands:
+                    params = self.commands[command]
+                    if params is not None:
 
-                params = self.commands[command]
-                if params is not None:
+                        payload = {
+                            "method": command,
+                            "params": params
+                        }
 
-                    payload = {
-                        "method": command,
-                        "params": params
-                    }
+                        response = _request(
+                            ip_address=device.ip_address, payload=payload)
+                        if response and "result" in response:
 
-                    response = _request(
-                        ip_address=device.ip_address, payload=payload)
-                    if response and "result" in response:
-
-                        if command == "getDevInfo":
-                            device = device.withDeviceInfo(DeviceInfo.from_json(response["result"]))
-                        elif command == "getSystemConfig":
-                            device = device.withSystemConfig(SystemConfig.from_json(response["result"]))
-                        elif command == "getUserConfig":
-                            device = device.withUserConfig(UserConfig.from_json(response["result"]))
-                        elif command == "getPilot":
-                            device = device.withPilot(Pilot.from_json(response["result"]))
-                        elif response["result"]["success"] == True:
-                            device = device.withPilot(Pilot.from_json(params, pilot=device.pilot))
+                            if command == "getDevInfo":
+                                device = device.withDeviceInfo(DeviceInfo.from_json(response["result"]))
+                            elif command == "getSystemConfig":
+                                device = device.withSystemConfig(SystemConfig.from_json(response["result"]))
+                            elif command == "getUserConfig":
+                                device = device.withUserConfig(UserConfig.from_json(response["result"]))
+                            elif command == "getPilot":
+                                device = device.withPilot(Pilot.from_json(response["result"]))
+                            elif response["result"]["success"] == True:
+                                device = device.withPilot(Pilot.from_json(params, pilot=device.pilot))
+        finally:
+            sock.close()
+            self.resetCommands()
 
 
 class WizDeviceCLI():
@@ -775,8 +784,6 @@ class WizDeviceCLI():
         "on": {
             _USAGE: "--on",
             _DESCR: "turn device on",
-            _REGEX: None,
-            _DESCR: "turn device off",
             _REGEX: None,
             _TYPES: None
         },
@@ -851,12 +858,6 @@ class WizDeviceCLI():
             _DESCR: "set loglevel",
             _REGEX: r"^(DEBUG|INFO|WARNING|ERROR)$",
             _TYPES: [str]
-        },
-        "reboot": {
-            _USAGE: "--reboot",
-            _DESCR: "reboot device",
-            _REGEX: None,
-            _TYPES: None
         }
     }
 
@@ -865,8 +866,10 @@ class WizDeviceCLI():
         self.alias: Alias = Alias()
         try:
 
+            # Remove the script name from argv so only user provided arguments remain.
             argv.pop(0)
             if "--log" in sys.argv:
+                # Parse a runtime log level option from the command line.
                 _idx_log = sys.argv.index("--log")
                 numeric_level = logging.getLevelName(
                     sys.argv[_idx_log + 1].upper())
@@ -955,17 +958,17 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
         help = self._build_help(header=True)
 
-        help += "\nBasic commands:"
+        help += "\n\nBasic commands:"
         help += self._build_help(command="status")
         help += self._build_help(command="on")
         help += self._build_help(command="off")
 
-        help += "\nSet light:"
+        help += "\n\nSet light:"
         help += self._build_help(command="temp")
         help += self._build_help(command="dimming")
         help += self._build_help(command="color")
 
-        help += "\nSet scene:"
+        help += "\n\nSet scene:"
         help += self._build_help(command="scene")
         help += self._build_help(command="speed")
 
@@ -1136,6 +1139,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             pass
 
     def transform_commands(self, commands: 'list[dict]'):
+        """Validate CLI commands and convert argument strings to typed parameters."""
 
         errors: 'list[str]' = list()
 
@@ -1177,6 +1181,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         return commands
 
     def parse_args(self, argv: 'list[str]') -> 'tuple[set[str], list[dict[str, list[str]]]]':
+        """Parse CLI arguments into device addresses and command definitions."""
 
         addresses: 'set[str]' = set()
         commands: 'list[tuple[str, list[str]]]' = list()
