@@ -420,27 +420,11 @@ class Pilot():
         return f"Pilot(state={self.state}, temp={self.temp}, r={self.r}, g={self.g}, b={self.b}, dimming={self.dimming}, sceneId={self.sceneId}, speed={self.speed}, rssi={self.rssi}, mac={self.mac})"
 
 
-class Listener():
-    """Listener interface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
+class WiZListener():
+    """Listener iWiZnterface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
 
     def onDiscoverFound(self, device: 'WizDevice') -> None:
         """Called when a new Wiz device is discovered during scanning. The device parameter is a WizDevice instance representing the discovered device."""
-
-        pass
-
-    def onConnected(self, device: 'WizDevice') -> None:
-
-        pass
-
-    def onDisconnected(self, device: 'WizDevice') -> None:
-
-        pass
-
-    def onRequest(self, device: 'WizDevice') -> None:
-
-        pass
-
-    def onNotify(self, device: 'WizDevice') -> None:
 
         pass
 
@@ -562,7 +546,7 @@ class Alias():
 class WizDeviceController():
     """Controller class for managing multiple Wiz devices, handling discovery, connection, and command execution."""
 
-    def __init__(self, addresses: 'list[str]', listener: Listener = None) -> None:
+    def __init__(self, addresses: 'list[str]', listener: WiZListener = None) -> None:
 
         self.addresses: 'list[str]' = addresses
         self.devices: 'list[WizDevice]' = [
@@ -584,13 +568,14 @@ class WizDeviceController():
         }
 
     @staticmethod
-    def discover_wiz_devices(broadcast_address="255.255.255.255", timeout=5, listener: Listener = None) -> 'list[WizDevice]':
+    def discover_wiz_devices(broadcast_address="255.255.255.255", timeout=1, listener: WiZListener = None) -> 'list[WizDevice]':
         """Discover Wiz devices on the local network by sending a UDP broadcast message and listening for responses. Returns a list of discovered WizDevice instances."""
 
         UDP_PORT = 38899
         discovery_message = {"method": "getSystemConfig", "params": {}}
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('', UDP_PORT))
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(timeout)
 
@@ -939,7 +924,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
     def scan(self) -> None:
 
-        class ScanListener(Listener):
+        class ScanListener(WiZListener):
 
             def __init__(self, alias: Alias) -> None:
                 self.alias: Alias = alias
@@ -1073,7 +1058,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
         try:
             controller = WizDeviceController(
-                addresses=addresses, listener=Listener())
+                addresses=addresses, listener=WiZListener())
 
             _commands: 'list[str]' = list()
 
