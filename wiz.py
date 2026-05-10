@@ -58,6 +58,19 @@ class DeviceInfo():
 
 class SystemConfig():
 
+    FEATURES = {
+        "SHRGBW": "Color Light (RGB + Dedicated White LED, fixed color temperature)",
+        "SHRGBC": "Full Color Light (RGB + Cold & Warm White)",
+        "SHRGB":  "Color Light (RGB)",
+        "SHDW":   "Tunable White (Cold & Warm White)",
+        "SHDIM":  "Dimmable (Fixed Color Temperature)",
+        "SOCKET": "Smart Outlet (Switching only, no power monitoring)",
+        "SHPL":   "Smart Plug (Switching)",
+        "POW":    "Power Monitoring Outlet (Energy tracking enabled)",
+        "STRIP":  "LED Strip Controller",
+        "PIR":    "Motion Sensor (Passive Infrared)"
+    }
+
     def __init__(self) -> None:
         self.mac: str = None
         self.home_id: str = None
@@ -68,6 +81,15 @@ class SystemConfig():
         self.group_id: int = 0
         self.ping: int = 0
         self.acc_udp_prop_rate: int = 0
+
+    @staticmethod
+    def getFeatureByModule(module_name: str) -> str:
+
+        for feature in SystemConfig.FEATURES:
+            if f"_{feature}_" in module_name:
+                return f"{SystemConfig.FEATURES[feature]} ({feature})"
+
+        return "unknown"
 
     @staticmethod
     def from_json(json_data: dict[str, str | int]) -> 'SystemConfig':
@@ -1049,6 +1071,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         if device.device_info:
 
             print(f"\n  Device Configuration:")
+            print(f"    Features:            {SystemConfig.getFeatureByModule(device.device_info.module_name)}")
             print(f"    Module Name:         {device.device_info.module_name}")
             print(f"    Flash Info:          {device.device_info.flash_info}")
 
