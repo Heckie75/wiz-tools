@@ -696,6 +696,18 @@ class WizDeviceController():
 
         self.setPilot(properties={"speed": speed})
 
+    def withHome(self, homeId: int) -> None:
+
+        self.setPilot(properties={"homeId": homeId})
+
+    def withRoom(self, roomId: int) -> None:
+
+        self.setPilot(properties={"roomId": roomId})
+        
+    def withGroup(self, groupId: int) -> None:
+
+        self.setPilot(properties={"groupId": groupId})
+
     def perform(self) -> None:
 
         UDP_PORT = 38899
@@ -836,6 +848,24 @@ class WizDeviceCLI():
             _REGEX: r"^([1-9][0-9]|1[0-9][0-9]|200)$",
             _TYPES: [int]
         },
+        "home": {
+            _USAGE: "--home <homeId>",
+            _DESCR: "set home in case that you send a broadcast",
+            _REGEX: r"^(\d+)$",
+            _TYPES: [int]
+        },        
+        "room": {
+            _USAGE: "--room <roomId>",
+            _DESCR: "set room in case that you send a broadcast",
+            _REGEX: r"^(\d+)$",
+            _TYPES: [int]
+        },        
+        "group": {
+            _USAGE: "--group <groupId>",
+            _DESCR: "set group in case that you send a broadcast",
+            _REGEX: r"^(\d+)$",
+            _TYPES: [int]
+        },        
         "help": {
             _USAGE: "--help [<command>]",
             _DESCR: "prints help optionally for given command",
@@ -955,9 +985,9 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             def onDiscoverFound(self, device: WizDevice) -> None:
                 alias = self.alias.aliases[device.ip_address] if self.alias and device.ip_address in self.alias.aliases else ""
                 print(
-                    f"{WizDevice.formatted_mac(device.system_config.mac)}\t{device.ip_address}\t{alias}", flush=True)
+                    f"{WizDevice.formatted_mac(device.system_config.mac)}\t{device.ip_address}\t{device.system_config.home_id}\t{device.system_config.room_id}\t{device.system_config.group_id}\t{alias}", flush=True)
 
-        print("MAC\t\tIP Address\tAlias", flush=True)
+        print("MAC\t\tIP Address\tHome\tRoom\tGroup\tAlias", flush=True)
         WizDeviceController.discover_wiz_devices(
             broadcast_address="255.255.255.255", listener=ScanListener(self.alias))
 
@@ -980,6 +1010,9 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         help += self._build_help(command="speed")
 
         help += "\n\nOther commands:"
+        help += self._build_help(command="home")
+        help += self._build_help(command="room")
+        help += self._build_help(command="group")
         help += self._build_help(command="dump")
         help += self._build_help(command="print")
         help += self._build_help(command="json")
@@ -1125,6 +1158,21 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
                     controller.withSpeed(
                         speed=command[WizDeviceCLI._PARAMS][0])
+
+                elif command[WizDeviceCLI._COMMAND] == "home" and command[WizDeviceCLI._PARAMS]:
+
+                    controller.withHome(
+                        homeId=command[WizDeviceCLI._PARAMS][0])
+
+                elif command[WizDeviceCLI._COMMAND] == "room" and command[WizDeviceCLI._PARAMS]:
+
+                    controller.withRoom(
+                        roomId=command[WizDeviceCLI._PARAMS][0])
+                    
+                elif command[WizDeviceCLI._COMMAND] == "group" and command[WizDeviceCLI._PARAMS]:
+
+                    controller.withGroup(
+                        groupId=command[WizDeviceCLI._PARAMS][0])
 
                 elif command[WizDeviceCLI._COMMAND] == "dump":
 
