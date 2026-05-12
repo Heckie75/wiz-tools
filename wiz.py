@@ -27,36 +27,12 @@ class WizDeviceException(Exception):
         self.message = message
 
 
-class DeviceInfo():
+class Features():
 
-    def __init__(self) -> None:
-        self.device_mac: str = None
-        self.module_name: str = None
-        self.flash_info: list = []
-
-    @staticmethod
-    def from_json(json_data: dict[str, str | int | list]) -> 'DeviceInfo':
-        """Factory method to create a DeviceInfo instance from a JSON response dictionary."""
-
-        info = DeviceInfo()
-        info.device_mac = json_data.get("devMac")
-        info.module_name = json_data.get("moduleName")
-        info.flash_info = json_data.get("flash", [])
-        return info
-
-    def to_dict(self) -> dict[str, str | int | list]:
-
-        return {
-            "device_mac": self.device_mac,
-            "module_name": self.module_name,
-            "flash_info": self.flash_info
-        }
-
-    def __str__(self):
-        return f"DeviceInfo(device_mac={self.device_mac}, module_name={self.module_name}, flash_info={self.flash_info})"
-
-
-class SystemConfig():
+    DEVICE_SOCKET = "SOCKET"
+    DEVICE_BULB = "BULB"
+    DEVICE_STRIP = "STRIP"
+    DEVICE_MOTION_SENSOR = "MOTION_SENSOR"
 
     FEATURES = {
         "SHRGBW": "Color Light (RGB + Dedicated White LED, fixed color temperature)",
@@ -71,6 +47,134 @@ class SystemConfig():
         "PIR":    "Motion Sensor (Passive Infrared)"
     }
 
+    def __init__(self):
+
+        self.module_name: str = ""
+        self.device_type: str = ""
+
+        self.color: bool = False
+        self.white: bool = False
+        self.temp: bool = False
+        self.dimming: bool = False
+        self.power_meter: bool = False
+
+    def getFeaturesDescription(self) -> str:
+
+        for feature in Features.FEATURES:
+            if f"_{feature}_" in self.module_name:
+                return f"{Features.FEATURES[feature]} ({feature})"
+
+        return "unknown"
+
+    @staticmethod
+    def fromModuleName(module_name) -> 'Features':
+
+        parts = module_name.upper().split('_')
+
+        features: Features = Features()
+        features.module_name = module_name
+
+        if len(parts) < 2:
+            raise WizDeviceException("invalid format")
+
+        type_key = parts[1]
+
+        # SHRGBC = Color + Tunable White (Full control)
+        if "RGBC" in type_key:
+            features.device_type = Features.DEVICE_BULB
+            features.color = True
+            features.white = True
+            features.temp = True
+            features.dimming = True
+
+        # SHRGBW = Color + Fixed White (No color temperature control)
+        elif "RGBW" in type_key:
+            features.device_type = Features.DEVICE_BULB
+            features.color = True
+            features.white = False
+            features.temp = True
+            features.dimming = True
+
+        # SHRGB = Color
+        elif "RGB" in type_key:
+            features.device_type = Features.DEVICE_BULB
+            features.color = True
+            features.white = False
+            features.temp = False
+            features.dimming = True
+
+        # SHDW / SHTW = Only Tunable White
+        elif any(x in type_key for x in ["DW", "TW"]):
+            features.device_type = Features.DEVICE_BULB
+            features.temp = True
+            features.dimming = True
+
+        # SHDIM = Just dimming, fixed temp
+        elif "DIM" in type_key:
+            features.device_type = Features.DEVICE_BULB
+            features.dimming = True
+
+        # SOCKETS / PLUGS
+        elif "SOCKET" in type_key or "PL" in type_key:
+            features.device_type = Features.DEVICE_SOCKET
+            if "POW" in type_key or "PL" in type_key:
+                features.power_meter = True
+
+        if Features.DEVICE_STRIP in module_name:
+            features.device_type = Features.DEVICE_STRIP
+
+        return features
+
+    def to_json(self) -> dict:
+
+        return {
+            "module_name": self.module_name,
+            "device_type": self.device_type,
+            "color": self.color,
+            "temp": self.temp,
+            "dimming": self.dimming,
+            "power_meter": self.power_meter,
+            "description": self.getFeaturesDescription()
+        }
+
+    def __str__(self) -> str:
+        return f"Features(module_name={self.module_name}, device_type={self.device_type}, color={self.coler}, white={self.white}, temp={self.temp}, dimming={self.dimming}, power_meter={self.power_meter})"
+
+
+class DeviceInfo():
+
+    def __init__(self) -> None:
+        self.device_mac: str = None
+        self.module_name: str = None
+        self.flash_info: list = []
+        self.features: Features = None
+
+    @staticmethod
+    def from_json(json_data: dict[str, str | int | list]) -> 'DeviceInfo':
+        """Factory method to create a DeviceInfo instance from a JSON response dictionary."""
+
+        info = DeviceInfo()
+        info.device_mac = json_data.get("devMac")
+        info.module_name = json_data.get("moduleName")
+        info.flash_info = json_data.get("flash", [])
+        info.features = Features.fromModuleName(info.module_name)
+        return info
+
+    def to_dict(self) -> dict[str, str | int | list]:
+
+        return {
+            "device_mac": self.device_mac,
+            "module_name": self.module_name,
+            "flash_info": self.flash_info,
+            "features": self.features.to_json()
+        }
+
+    def __str__(self):
+        return f"DeviceInfo(device_mac={self.device_mac}, module_name={self.module_name}, flash_info={self.flash_info})"
+
+
+class SystemConfig():
+
     def __init__(self) -> None:
         self.mac: str = None
         self.home_id: str = None
@@ -81,15 +185,6 @@ class SystemConfig():
         self.group_id: int = 0
         self.ping: int = 0
         self.acc_udp_prop_rate: int = 0
-
-    @staticmethod
-    def getFeatureByModule(module_name: str) -> str:
-
-        for feature in SystemConfig.FEATURES:
-            if f"_{feature}_" in module_name:
-                return f"{SystemConfig.FEATURES[feature]} ({feature})"
-
-        return "unknown"
 
     @staticmethod
     def from_json(json_data: dict[str, str | int]) -> 'SystemConfig':
@@ -120,10 +215,6 @@ class SystemConfig():
             "ping": self.ping,
             "acc_udp_prop_rate": self.acc_udp_prop_rate
         }
-
-    def getter_method(self):
-
-        return "getSystemConfig"
 
     def __str__(self):
         return f"SystemConfig(mac={self.mac}, home_id={self.home_id}, room_id={self.room_id}, region={self.region}, module_name={self.module_name}, firmware_version={self.firmware_version}, group_id={self.group_id}, ping={self.ping}, acc_udp_prop_rate={self.acc_udp_prop_rate})"
@@ -251,7 +342,7 @@ class Pilot():
         "Cozy",
         "Forest",
         "Pastel Colors",
-        "Wake-up",
+        "Wakeup",
         "Bedtime",
         "Warm White",
         "Daylight",
@@ -667,9 +758,9 @@ class WizDeviceController():
 
         self.setPilot(properties={"dimming": dimming})
 
-    def withColor(self, red: int, green: int, blue: int) -> None:
+    def withColor(self, red: int = 0, green: int = 0, blue: int = 0, white: int = 0) -> None:
 
-        self.setPilot(properties={"r": red, "g": green, "b": blue})
+        self.setPilot(properties={"r": red, "g": green, "b": blue, "w": white})
 
     def withScene(self, scene: str) -> None:
 
@@ -703,7 +794,7 @@ class WizDeviceController():
     def withRoom(self, roomId: int) -> None:
 
         self.setPilot(properties={"roomId": roomId})
-        
+
     def withGroup(self, groupId: int) -> None:
 
         self.setPilot(properties={"groupId": groupId})
@@ -755,15 +846,20 @@ class WizDeviceController():
                         if response and "result" in response:
 
                             if command == "getDevInfo":
-                                device = device.withDeviceInfo(DeviceInfo.from_json(response["result"]))
+                                device = device.withDeviceInfo(
+                                    DeviceInfo.from_json(response["result"]))
                             elif command == "getSystemConfig":
-                                device = device.withSystemConfig(SystemConfig.from_json(response["result"]))
+                                device = device.withSystemConfig(
+                                    SystemConfig.from_json(response["result"]))
                             elif command == "getUserConfig":
-                                device = device.withUserConfig(UserConfig.from_json(response["result"]))
+                                device = device.withUserConfig(
+                                    UserConfig.from_json(response["result"]))
                             elif command == "getPilot":
-                                device = device.withPilot(Pilot.from_json(response["result"]))
+                                device = device.withPilot(
+                                    Pilot.from_json(response["result"]))
                             elif response["result"]["success"] == True:
-                                device = device.withPilot(Pilot.from_json(params, pilot=device.pilot))
+                                device = device.withPilot(
+                                    Pilot.from_json(params, pilot=device.pilot))
         finally:
             sock.close()
             self.resetCommands()
@@ -831,10 +927,10 @@ class WizDeviceCLI():
             _TYPES: [int]
         },
         "color": {
-            _USAGE: "--color <red> <green> <blue>",
+            _USAGE: "--color <red> <green> <blue> [<shite>]",
             _DESCR: "set color, each value 0 - 255",
-            _REGEX: r"^%s %s %s$" % (_REG_255, _REG_255, _REG_255),
-            _TYPES: [int, int, int]
+            _REGEX: r"^%s %s %s( %s)?$" % (_REG_255, _REG_255, _REG_255, _REG_255),
+            _TYPES: [int, int, int, int]
         },
         "scene": {
             _USAGE: "--scene <id/name>",
@@ -853,19 +949,19 @@ class WizDeviceCLI():
             _DESCR: "set home in case that you send a broadcast",
             _REGEX: r"^(\d+)$",
             _TYPES: [int]
-        },        
+        },
         "room": {
             _USAGE: "--room <roomId>",
             _DESCR: "set room in case that you send a broadcast",
             _REGEX: r"^(\d+)$",
             _TYPES: [int]
-        },        
+        },
         "group": {
             _USAGE: "--group <groupId>",
             _DESCR: "set group in case that you send a broadcast",
             _REGEX: r"^(\d+)$",
             _TYPES: [int]
-        },        
+        },
         "help": {
             _USAGE: "--help [<command>]",
             _DESCR: "prints help optionally for given command",
@@ -985,9 +1081,9 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             def onDiscoverFound(self, device: WizDevice) -> None:
                 alias = self.alias.aliases[device.ip_address] if self.alias and device.ip_address in self.alias.aliases else ""
                 print(
-                    f"{WizDevice.formatted_mac(device.system_config.mac)}\t{device.ip_address}\t{device.system_config.home_id}\t{device.system_config.room_id}\t{device.system_config.group_id}\t{alias}", flush=True)
+                    f"{WizDevice.formatted_mac(device.system_config.mac)}\t{device.ip_address}\t{device.system_config.module_name}\t{device.system_config.home_id}\t{device.system_config.room_id}\t{device.system_config.group_id}\t{alias}", flush=True)
 
-        print("MAC\t\tIP Address\tHome\tRoom\tGroup\tAlias", flush=True)
+        print("MAC\t\tIP Address\tModule\tHome\tRoom\tGroup\tAlias", flush=True)
         WizDeviceController.discover_wiz_devices(
             broadcast_address="255.255.255.255", listener=ScanListener(self.alias))
 
@@ -1104,9 +1200,22 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         if device.device_info:
 
             print(f"\n  Device Configuration:")
-            print(f"    Features:            {SystemConfig.getFeatureByModule(device.device_info.module_name)}")
             print(f"    Module Name:         {device.device_info.module_name}")
             print(f"    Flash Info:          {device.device_info.flash_info}")
+            print(
+                f"    device type:         {device.device_info.features.device_type.capitalize()}")
+            print(
+                f"    has RGB LED:         {device.device_info.features.color}")
+            print(
+                f"    has white LED:       {device.device_info.features.white}")
+            print(
+                f"    has temperature:     {device.device_info.features.temp}")
+            print(
+                f"    has dimming:         {device.device_info.features.dimming}")
+            print(
+                f"    has power meter:     {device.device_info.features.power_meter}")
+            print(
+                f"    Description:         {device.device_info.features.getFeaturesDescription()}")
 
         print()
 
@@ -1147,7 +1256,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
                 elif command[WizDeviceCLI._COMMAND] == "color" and command[WizDeviceCLI._PARAMS]:
 
                     controller.withColor(
-                        red=command[WizDeviceCLI._PARAMS][0], green=command[WizDeviceCLI._PARAMS][1], blue=command[WizDeviceCLI._PARAMS][2])
+                        red=command[WizDeviceCLI._PARAMS][0], green=command[WizDeviceCLI._PARAMS][1], blue=command[WizDeviceCLI._PARAMS][2], white=command[WizDeviceCLI._PARAMS][3] if len(command[WizDeviceCLI._PARAMS]) == 4 else 0)
 
                 elif command[WizDeviceCLI._COMMAND] == "scene" and command[WizDeviceCLI._PARAMS]:
 
@@ -1168,7 +1277,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
                     controller.withRoom(
                         roomId=command[WizDeviceCLI._PARAMS][0])
-                    
+
                 elif command[WizDeviceCLI._COMMAND] == "group" and command[WizDeviceCLI._PARAMS]:
 
                     controller.withGroup(
