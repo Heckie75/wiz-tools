@@ -3,8 +3,13 @@ import json
 import logging
 import os
 import re
+import platform
 import socket
 import sys
+import hashlib
+import subprocess
+import time
+import uuid
 
 
 _REG_255 = r"(1?[0-9]?[0-9]|2[0-4][0-9]|25[0-5])"
@@ -297,8 +302,8 @@ class ModelConfig():
         self.nowc: int = 0
         self.cct_range: list[int] = []
         self.render_factor: list[int] = []
-        self.wizc1: MethodWizardConfig | None = None
-        self.wizc2: MethodWizardConfig | None = None
+        self.wizc1: WizardConfig | None = None
+        self.wizc2: WizardConfig | None = None
         self.drv_iface: int = 0
         self.i2c_drv: list[I2CDriver] = []
 
@@ -327,7 +332,8 @@ class ModelConfig():
         config.wizc1 = WizardConfig.from_json(json_data.get("wizc1", {}))
         config.wizc2 = WizardConfig.from_json(json_data.get("wizc2", {}))
         config.drv_iface = json_data.get("drvIface", 0)
-        config.i2c_drv = [I2CDriver.from_json(driver) for driver in json_data.get("i2cDrv", [])]
+        config.i2c_drv = [I2CDriver.from_json(
+            driver) for driver in json_data.get("i2cDrv", [])]
         return config
 
     def to_dict(self) -> dict[str, str | int | bool | list | dict]:
@@ -394,8 +400,10 @@ class UserConfig():
         config.auto_update = json_data.get("autoUpd", 0)
         config.devices_count = json_data.get("devices", 0)
         config.dim_to_warm_points = json_data.get("dim2WarmPoints", [])
-        config.wizard_config1 = WizardConfig.from_json(json_data.get("wizc1", {}))
-        config.wizard_config2 = WizardConfig.from_json(json_data.get("wizc2", {}))
+        config.wizard_config1 = WizardConfig.from_json(
+            json_data.get("wizc1", {}))
+        config.wizard_config2 = WizardConfig.from_json(
+            json_data.get("wizc2", {}))
         config.ap_stack_enabled = json_data.get("apStkEn", False)
         config.config_timestamp = json_data.get("confTs", 0)
 
@@ -628,17 +636,12 @@ class Pilot():
 
     @staticmethod
     def scene_list() -> 'list[str]':
-
-        scenes = list()
-        for i, s in enumerate(Pilot.SCENES_LIST):
-            if i == 37:
-                scenes.append(f"{s} ({Pilot.SCENE_DIM_TO_WARM})")
-            elif i == 38:
-                scenes.append(f"{s} ({Pilot.SCENE_RHYTHM})")
-            else:
-                scenes.append(f"{s} ({i})")
-
-        return scenes
+        return [
+            f"{s} ({Pilot.SCENE_DIM_TO_WARM})" if i == 37 else
+            f"{s} ({Pilot.SCENE_RHYTHM})" if i == 38 else
+            f"{s} ({i})"
+            for i, s in enumerate(Pilot.SCENES_LIST)
+        ]
 
     def scene_str(self) -> str:
         """Get the human-readable name of a scene based on its integer identifier. Handles special cases for certain scene values and falls back to a predefined list of scene names."""
@@ -674,11 +677,11 @@ class Pilot():
 
 
 class Power():
-    
+
     def __init__(self):
-        
+
         self.power: int = None
-    
+
     @staticmethod
     def from_json(json_data: dict[str, str | int | bool | list | dict]) -> 'Power':
         """Factory method to create a Power instance from a JSON response dictionary."""
@@ -696,6 +699,7 @@ class Power():
     def __str__(self):
         return f"Power(power={self.power})"
 
+
 class WiZListener():
     """Listener iWiZnterface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
 
@@ -703,6 +707,9 @@ class WiZListener():
         """Called when a new Wiz device is discovered during scanning. The device parameter is a WizDevice instance representing the discovered device."""
 
         pass
+    
+    def onMessage(self, message: str):
+        print(message)
 
 
 class WizDevice():
@@ -802,28 +809,23 @@ class Alias():
         """Resolve a label to a set of IP addresses. If the label is an IP address, it is returned as a single-item set. If the label is an alias, all associated IP addresses are returned. If no matches are found, None is returned."""
 
         if re.match(Alias.IP_PATTERN, label):
-            if label:
-                return {label}
-            else:
-                return None
+            return {label} if label else None
 
-        elif re.match(Alias.MAC_PATTERN, label):
+        if re.match(Alias.MAC_PATTERN, label):
             devices = WizDeviceController.discover_wiz_devices(
                 broadcast_address="255.255.255.255")
             ip_addresses = {
                 d.ip_address for d in devices if d.mac and d.formatted_mac() == label.upper()}
-            return ip_addresses if ip_addresses else None
+            return ip_addresses or None
 
+        ip_addresses = {
+            alias for alias, value in self.aliases.items() if label in value
+        }
+        if ip_addresses:
+            LOGGER.debug("Found IP addresses for aliases: %s", ", ".join(ip_addresses))
         else:
-            ip_addresses = {alias
-                            for alias in self.aliases if label in self.aliases[alias]}
-            if ip_addresses:
-                LOGGER.debug(
-                    f"Found IP addresses for aliases: {', '.join(ip_addresses)}")
-            else:
-                LOGGER.debug("No aliases found")
-
-            return ip_addresses if ip_addresses else None
+            LOGGER.debug("No aliases found")
+        return ip_addresses or None
 
     def __str__(self) -> str:
         """String representation of the Alias instance, showing all known aliases and their associated IP addresses."""
@@ -834,38 +836,152 @@ class Alias():
 class WizDeviceController():
     """Controller class for managing multiple Wiz devices, handling discovery, connection, and command execution."""
 
+    UDP_PORT = 38899
+
     def __init__(self, addresses: 'list[str]', listener: WiZListener = None) -> None:
 
         self.addresses: 'list[str]' = addresses
         self.devices: 'list[WizDevice]' = [
             WizDevice(ip_address=a) for a in addresses]
 
-        self._listener = listener
+        self.listener = listener
+        self.listener_duration: int = 0
 
         self.commands: dict[str, dict] = None
         self.resetCommands()
 
+        self.requestId: int = 0
+
+    def withListener(self, listener: WiZListener, duration: int) -> None:
+        """Configure the UDP listener duration in seconds."""
+
+        self.listener = listener
+        self.listener_duration = int(duration)
+
+    def startListener(self) -> None:
+        """Listen for incoming Wiz UDP messages and forward events to the configured listener."""
+
+        if not self.listener:
+            LOGGER.warning("No listener configured for UDP listen mode")
+            return
+
+        if self.listener_duration <= 0:
+            LOGGER.warning("Listener duration must be greater than 0 seconds")
+            return
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        try:
+            sock.bind(("", WizDeviceController.UDP_PORT))
+            sock.settimeout(0.5)
+
+            LOGGER.info(
+                "Listening for Wiz UDP messages on port %s for %s seconds",
+                WizDeviceController.UDP_PORT,
+                self.listener_duration,
+            )
+
+            stop_time = time.monotonic() + self.listener_duration
+            while time.monotonic() < stop_time:
+                try:
+                    data, addr = sock.recvfrom(4096)
+                    payload = data.decode("utf-8")
+                    LOGGER.debug(
+                            "<<< Received packet from %s:%s: %s",
+                            addr[0],
+                            addr[1],
+                            payload
+                        )
+                    try:
+                        message = json.loads(payload)
+                    except json.JSONDecodeError:
+                        LOGGER.debug(
+                            "Received non-JSON UDP packet from %s:%s",
+                            addr[0],
+                            addr[1],
+                        )
+                        continue
+
+                    # self.listener.onDiscoverFound(device)
+                    self.listener.onMessage(payload)
+
+                except socket.timeout:
+                    continue
+                except Exception as ex:
+                    LOGGER.error("UDP listener error: %s", ex)
+                    break
+        except Exception as ex:
+            LOGGER.error("Unable to start UDP listener on port %s: %s", WizDeviceController.UDP_PORT, ex)
+        finally:
+            sock.close()
+
+    def get_source_ip(self) -> str:
+
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        test_sock.setblocking(False)  # must be non-blocking for async
+        try:
+            test_sock.connect((self.devices[0].ip_address, 1))
+            source_ip = test_sock.getsockname()[0]
+            return source_ip
+        except Exception:
+            LOGGER.debug(
+                "The system could not auto detect the source ip for %s on your operating system",
+                self.devices[0].ip_address,
+            )
+            return None
+        finally:
+            test_sock.close()
+
+    @staticmethod
+    def generate_mac():
+        """
+            Erzeugt eine stabile, hardwaregebundene ID im 12-stelligen Hex-Format,
+            die keine echte MAC-Adresse ist, aber auf demselben Gerät konsistent bleibt.
+        """
+        system_id = ""
+
+        try:
+            if platform.system() == "Windows":
+                cmd = 'wmic csproduct get uuid'
+                system_id = subprocess.check_output(
+                    cmd, shell=True).decode().split('\n')[1].strip()
+            elif platform.system() == "Linux":
+                # Nutzt die eindeutige Machine-ID unter Linux
+                with open("/etc/machine-id", "r") as f:
+                    system_id = f.read().strip()
+        except Exception:
+            system_id = str(uuid.getnode())
+
+        hash_object = hashlib.sha256(system_id.encode())
+        hex_hash = hash_object.hexdigest()
+
+        wiz_id = hex_hash[:12].lower()
+
+        return wiz_id
+
     def resetCommands(self):
 
         self.commands: dict[str, dict] = {
+            "registration": None,
             "getDevInfo": None,
             "getModelConfig": None,
             "getSystemConfig": None,
             "getUserConfig": None,
             "getPower": None,
             "getPilot": None,
-            "setPilot": None
+            "setPilot": None,
+            "pulse": None
         }
 
     @staticmethod
     def discover_wiz_devices(broadcast_address="255.255.255.255", timeout=1, listener: WiZListener = None) -> 'list[WizDevice]':
         """Discover Wiz devices on the local network by sending a UDP broadcast message and listening for responses. Returns a list of discovered WizDevice instances."""
 
-        UDP_PORT = 38899
         discovery_message = {"method": "getSystemConfig", "params": {}}
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(('', UDP_PORT))
+        sock.bind(('', WizDeviceController.UDP_PORT))
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(timeout)
 
@@ -873,9 +989,9 @@ class WizDeviceController():
 
         try:
             LOGGER.debug(
-                f"Sending discovery message to {broadcast_address}:{UDP_PORT}")
+                f"Sending discovery message to {broadcast_address}:{WizDeviceController.UDP_PORT}")
             sock.sendto(json.dumps(discovery_message).encode(
-                'utf-8'), (broadcast_address, UDP_PORT))
+                'utf-8'), (broadcast_address, WizDeviceController.UDP_PORT))
 
             while True:
                 try:
@@ -984,6 +1100,26 @@ class WizDeviceController():
 
         self.setPilot(properties={"groupId": groupId})
 
+    def register(self, value: bool = True) -> None:
+
+        self.commands["registration"] = {
+            "register": value,
+            "phoneMac": WizDeviceController.generate_mac(),
+            "phoneIp": self.get_source_ip(),
+            "homeId":19617418
+        }
+
+    def unregister(self) -> None:
+
+        self.register(False)
+
+    def pulse(self, delta: int = 15, duration: int = 300) -> None:
+
+        self.commands["pulse"] = {
+            "delta": delta,
+            "duration": duration
+        }
+
     def reboot(self) -> None:
 
         self.commands["reboot"] = {}
@@ -994,7 +1130,6 @@ class WizDeviceController():
 
     def perform(self) -> None:
 
-        UDP_PORT = 38899
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(.5)
@@ -1002,11 +1137,11 @@ class WizDeviceController():
         def _request(ip_address: str, payload: dict[str, str | int | dict[str, str | int]]):
 
             LOGGER.debug(
-                f">>> Sending message {payload} to {ip_address}:{UDP_PORT}")
+                f">>> Sending message {payload} to {ip_address}:{WizDeviceController.UDP_PORT}")
 
             try:
                 sock.sendto(json.dumps(payload).encode(
-                    "utf-8"), (ip_address, UDP_PORT))
+                    "utf-8"), (ip_address, WizDeviceController.UDP_PORT))
                 data, addr = sock.recvfrom(1024)
                 response = json.loads(data.decode("utf-8"))
                 LOGGER.debug(
@@ -1022,43 +1157,39 @@ class WizDeviceController():
 
             return response
 
+        result_handlers = {
+            "getDevInfo": lambda device, result: device.withDeviceInfo(DeviceInfo.from_json(result)),
+            "getSystemConfig": lambda device, result: device.withSystemConfig(SystemConfig.from_json(result)),
+            "getModelConfig": lambda device, result: device.withModelConfig(ModelConfig.from_json(result)),
+            "getUserConfig": lambda device, result: device.withUserConfig(UserConfig.from_json(result)),
+            "getPilot": lambda device, result: device.withPilot(Pilot.from_json(result)),
+            "getPower": lambda device, result: device.withPower(Power.from_json(result)),
+            "pulse": lambda device, result: device,
+        }
+
         try:
             for device in self.devices:
-                for command in self.commands:
+                for command, params in self.commands.items():
+                    if params is None:
+                        continue
 
-                    params = self.commands[command]
-                    if params is not None:
+                    self.requestId += 1
+                    payload = {
+                        "version": 1,
+                        "method": command,
+                        "id": self.requestId,
+                        "params": params
+                    }
 
-                        payload = {
-                            "method": command,
-                            "params": params
-                        }
-
-                        response = _request(
-                            ip_address=device.ip_address, payload=payload)
-                        if response and "result" in response:
-
-                            if command == "getDevInfo":
-                                device = device.withDeviceInfo(
-                                    DeviceInfo.from_json(response["result"]))
-                            elif command == "getSystemConfig":
-                                device = device.withSystemConfig(
-                                    SystemConfig.from_json(response["result"]))
-                            elif command == "getModelConfig":
-                                device = device.withModelConfig(
-                                    ModelConfig.from_json(response["result"]))
-                            elif command == "getUserConfig":
-                                device = device.withUserConfig(
-                                    UserConfig.from_json(response["result"]))
-                            elif command == "getPilot":
-                                device = device.withPilot(
-                                    Pilot.from_json(response["result"]))
-                            elif command == "getPower":
-                                device = device.withPower(
-                                    Power.from_json(response["result"]))
-                            elif response["result"]["success"] == True:
-                                device = device.withPilot(
-                                    Pilot.from_json(params, pilot=device.pilot))
+                    response = _request(
+                        ip_address=device.ip_address, payload=payload)
+                    if response and "result" in response:
+                        if command == "setPilot" and response["result"].get("success"):
+                            device = device.withPilot(Pilot.from_json(params, pilot=device.pilot))
+                        else:
+                            handler = result_handlers.get(command)
+                            if handler:
+                                device = handler(device, response["result"])
         finally:
             sock.close()
             self.resetCommands()
@@ -1071,143 +1202,196 @@ class WizDeviceCLI():
     _DESCR = "descr"
     _REGEX = "regex"
     _TYPES = "types"
+    _ACTION = "action"
 
     _COMMAND = "command"
     _ARGS = "args"
     _PARAMS = "params"
 
-    COMMANDS: dict[str, dict[str, str | None]] = {
+    COMMANDS: dict[str, dict[str, object]] = {
         "aliases": {
             _USAGE: "--aliases",
             _DESCR: "print known aliases from .known_wizs file",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: None,
         },
         "scan": {
             _USAGE: "--scan",
             _DESCR: "scan for Wiz devices",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: None,
         },
         "status": {
             _USAGE: "--status",
             _DESCR: "just read and print the basic information of wiz device",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.getPilot(),
         },
         "power": {
             _USAGE: "--power",
             _DESCR: "read power measurements from wiz device",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.getPower(),
         },
         "on": {
             _USAGE: "--on",
             _DESCR: "turn device on",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.withState(state=True),
         },
         "off": {
             _USAGE: "--off",
             _DESCR: "turn device off",
             _REGEX: None,
-            _TYPES: None
-        },
-        "toggle": {
-            _USAGE: "--toggle",
-            _DESCR: "turn off / on",
-            _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.withState(state=False),
         },
         "temp": {
             _USAGE: "--temp <temp>",
             _DESCR: "set temperature for white\n- <temp> value 2200 - 6500",
             _REGEX: r"^%s$" % (_REG_TEMP),
-            _TYPES: [int]
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withTemp(temp=params[0]),
         },
         "dimming": {
             _USAGE: "--dimming <dimming>",
             _DESCR: "set dimming for light\n- <dimming> value 10 - 100",
             _REGEX: r"^%s$" % (_REG_DIMMING),
-            _TYPES: [int]
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withDimming(dimming=params[0]),
         },
         "color": {
             _USAGE: "--color <red> <green> <blue> [<shite>]",
             _DESCR: "set color, each value 0 - 255",
             _REGEX: r"^%s %s %s( %s)?$" % (_REG_255, _REG_255, _REG_255, _REG_255),
-            _TYPES: [int, int, int, int]
+            _TYPES: [int, int, int, int],
+            _ACTION: lambda controller, params: controller.withColor(
+                red=params[0], green=params[1], blue=params[2], white=params[3] if len(params) == 4 else 0
+            ),
         },
         "scene": {
             _USAGE: "--scene <id/name>",
             _DESCR: "set scene by name or id\n- %s" % "\n- ".join(Pilot.scene_list()),
             _REGEX: r"^(%s|%s|%s|%s)$" % (str(Pilot.SCENE_DIM_TO_WARM), str(Pilot.SCENE_RHYTHM), "|".join([str(i) for i in range(len(Pilot.SCENES_LIST) - 2)]), "|".join(Pilot.SCENES_LIST)),
-            _TYPES: [str]
+            _TYPES: [str],
+            _ACTION: lambda controller, params: controller.withScene(scene=params[0]),
+        },
+        "pulse": {
+            _USAGE: "--pulse <delta> <duration>",
+            _DESCR: "fade-in and out bulb acc. delta +/- and duration in ms",
+            _REGEX: r"^(-?(?:\d{1,2}|100)) (\d{1,7})$",
+            _TYPES: [int, int],
+            _ACTION: lambda controller, params: controller.pulse(delta=params[0], duration=params[1]),
         },
         "speed": {
             _USAGE: "--speed <speed>",
             _DESCR: "set speed for scene, speed 10 - 200",
             _REGEX: r"^([1-9][0-9]|1[0-9][0-9]|200)$",
-            _TYPES: [int]
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withSpeed(speed=params[0]),
+        },
+        "register": {
+            _USAGE: "--register",
+            _DESCR: "register this client",
+            _REGEX: None,
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.register(),
+        },
+        "unregister": {
+            _USAGE: "--unregister",
+            _DESCR: "unregister this client",
+            _REGEX: None,
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.unregister(),
+        },
+        "listen": {
+            _USAGE: "--listen <seconds>",
+            _DESCR: "Listen to broadvcast messages and print them",
+            _REGEX: r"^(\d+)$",
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withListener(listener=WiZListener(), duration=params[0]) if params else None,
         },
         "reset": {
             _USAGE: "--reset",
             _DESCR: "set device to factory settings",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.reset(),
         },
         "reboot": {
-            _USAGE: "--reset",
+            _USAGE: "--reboot",
             _DESCR: "reboot the device",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: controller.reboot(),
         },
         "home": {
             _USAGE: "--home <homeId>",
             _DESCR: "set home in case that you send a broadcast",
             _REGEX: r"^(\d+)$",
-            _TYPES: [int]
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withHome(homeId=params[0]),
         },
         "room": {
             _USAGE: "--room <roomId>",
             _DESCR: "set room in case that you send a broadcast",
             _REGEX: r"^(\d+)$",
-            _TYPES: [int]
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withRoom(roomId=params[0]),
         },
         "group": {
             _USAGE: "--group <groupId>",
             _DESCR: "set group in case that you send a broadcast",
             _REGEX: r"^(\d+)$",
-            _TYPES: [int]
+            _TYPES: [int],
+            _ACTION: lambda controller, params: controller.withGroup(groupId=params[0]),
         },
         "help": {
             _USAGE: "--help [<command>]",
             _DESCR: "prints help optionally for given command",
             _REGEX: r"^([a-z-]+)?$",
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: None,
         },
         "dump": {
             _USAGE: "--dump",
             _DESCR: "request full state of bulb",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: lambda controller, params: [
+                controller.getDevInfo(),
+                controller.getSystemConfig(),
+                controller.getModelConfig(),
+                controller.getUserConfig(),
+                controller.getPilot(),
+                controller.getPower(),
+            ],
         },
         "print": {
             _USAGE: "--print",
             _DESCR: "prints collected data of bulb",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: None,
         },
         "json": {
             _USAGE: "--json",
             _DESCR: "prints information in json format",
             _REGEX: None,
-            _TYPES: None
+            _TYPES: None,
+            _ACTION: None,
         },
         "log": {
             _USAGE: "--log <DEBUG|INFO|WARNING|ERROR>",
             _DESCR: "set loglevel",
             _REGEX: r"^(DEBUG|INFO|WARNING|ERROR)$",
-            _TYPES: [str]
+            _TYPES: [str],
+            _ACTION: None,
         }
     }
 
@@ -1310,6 +1494,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
         help += "\n\nBasic commands:"
         help += self._build_help(command="status")
+        help += self._build_help(command="power")
         help += self._build_help(command="on")
         help += self._build_help(command="off")
 
@@ -1323,6 +1508,9 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         help += self._build_help(command="speed")
 
         help += "\n\nOther commands:"
+        help += self._build_help(command="register")
+        help += self._build_help(command="unregister")
+        help += self._build_help(command="listen")
         help += self._build_help(command="reboot")
         help += self._build_help(command="reset")
         help += self._build_help(command="home")
@@ -1401,14 +1589,18 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
                 f"    Devices Count:       {device.user_config.devices_count}")
             print(f"    Wizard Config 1:")
             if device.user_config.wizard_config1:
-                print(f"      mode:              {device.user_config.wizard_config1.mode}")
-                print(f"      opts:              {device.user_config.wizard_config1.opts}")
+                print(
+                    f"      mode:              {device.user_config.wizard_config1.mode}")
+                print(
+                    f"      opts:              {device.user_config.wizard_config1.opts}")
             else:
                 print(f"      <none>")
             print(f"    Wizard Config 2:")
             if device.user_config.wizard_config2:
-                print(f"      mode:              {device.user_config.wizard_config2.mode}")
-                print(f"      opts:              {device.user_config.wizard_config2.opts}")
+                print(
+                    f"      mode:              {device.user_config.wizard_config2.mode}")
+                print(
+                    f"      opts:              {device.user_config.wizard_config2.opts}")
             else:
                 print(f"      <none>")
             print(
@@ -1434,9 +1626,12 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             print(f"    headTotal:           {device.model_config.head_total}")
             print(f"    swHead:              {device.model_config.sw_head}")
             print(f"    ps:                  {device.model_config.ps}")
-            print(f"    hasGradient:         {device.model_config.has_gradient}")
-            print(f"    nightLightOff:       {device.model_config.night_light_off}")
-            print(f"    minDimLevel:         {device.model_config.min_dim_level}")
+            print(
+                f"    hasGradient:         {device.model_config.has_gradient}")
+            print(
+                f"    nightLightOff:       {device.model_config.night_light_off}")
+            print(
+                f"    minDimLevel:         {device.model_config.min_dim_level}")
             print(f"    devices:             {device.model_config.devices}")
             print(f"    devType:             {device.model_config.dev_type}")
             print(f"    lightType:           {device.model_config.light_type}")
@@ -1447,18 +1642,23 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             print(f"    wcr:                 {device.model_config.wcr}")
             print(f"    nowc:                {device.model_config.nowc}")
             print(f"    cctRange:            {device.model_config.cct_range}")
-            print(f"    renderFactor:        {device.model_config.render_factor}")
+            print(
+                f"    renderFactor:        {device.model_config.render_factor}")
             print(f"    wizc1:")
             if device.model_config.wizc1:
-                print(f"      mode:              {device.model_config.wizc1.mode}")
-                print(f"      opts:              {device.model_config.wizc1.opts}")
+                print(
+                    f"      mode:              {device.model_config.wizc1.mode}")
+                print(
+                    f"      opts:              {device.model_config.wizc1.opts}")
             else:
                 print(f"      <none>")
 
             print(f"    wizc2:")
             if device.model_config.wizc2:
-                print(f"      mode:              {device.model_config.wizc2.mode}")
-                print(f"      opts:              {device.model_config.wizc2.opts}")
+                print(
+                    f"      mode:              {device.model_config.wizc2.mode}")
+                print(
+                    f"      opts:              {device.model_config.wizc2.opts}")
             else:
                 print(f"      <none>")
 
@@ -1466,7 +1666,8 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             print(f"    i2cDrv:")
             if device.model_config.i2c_drv:
                 for idx, driver in enumerate(device.model_config.i2c_drv, start=1):
-                    print(f"      [{idx}] chip={driver.chip} addr={driver.addr} freq={driver.freq} curr={driver.curr} output={driver.output}")
+                    print(
+                        f"      [{idx}] chip={driver.chip} addr={driver.addr} freq={driver.freq} curr={driver.curr} output={driver.output}")
             else:
                 print(f"      []")
 
@@ -1498,81 +1699,14 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
             commands: list[str] = list()
             for command in cliCommands:
+                cmd = command[WizDeviceCLI._COMMAND]
+                commands.append(cmd)
 
-                commands.append(command[WizDeviceCLI._COMMAND])
-                if command[WizDeviceCLI._COMMAND] == "status":
+                cmd_def = WizDeviceCLI.COMMANDS.get(cmd, {})
+                action = cmd_def.get(WizDeviceCLI._ACTION)
+                if action:
+                    action(controller, command.get(WizDeviceCLI._PARAMS, []))
 
-                    controller.getPilot()
-
-                elif command[WizDeviceCLI._COMMAND] == "power":
-
-                    controller.getPower()
-
-                elif command[WizDeviceCLI._COMMAND] == "on":
-
-                    controller.withState(state=True)
-
-                elif command[WizDeviceCLI._COMMAND] == "off":
-
-                    controller.withState(state=False)
-
-                elif command[WizDeviceCLI._COMMAND] == "temp":
-
-                    controller.withTemp(
-                        temp=int(command[WizDeviceCLI._PARAMS][0]))
-
-                elif command[WizDeviceCLI._COMMAND] == "dimming":
-
-                    controller.withDimming(dimming=int(
-                        command[WizDeviceCLI._PARAMS][0]))
-
-                elif command[WizDeviceCLI._COMMAND] == "color" and command[WizDeviceCLI._PARAMS]:
-
-                    controller.withColor(
-                        red=command[WizDeviceCLI._PARAMS][0], green=command[WizDeviceCLI._PARAMS][1], blue=command[WizDeviceCLI._PARAMS][2], white=command[WizDeviceCLI._PARAMS][3] if len(command[WizDeviceCLI._PARAMS]) == 4 else 0)
-
-                elif command[WizDeviceCLI._COMMAND] == "scene" and command[WizDeviceCLI._PARAMS]:
-
-                    controller.withScene(
-                        scene=command[WizDeviceCLI._PARAMS][0])
-
-                elif command[WizDeviceCLI._COMMAND] == "speed" and command[WizDeviceCLI._PARAMS]:
-
-                    controller.withSpeed(
-                        speed=command[WizDeviceCLI._PARAMS][0])
-
-                elif command[WizDeviceCLI._COMMAND] == "home" and command[WizDeviceCLI._PARAMS]:
-
-                    controller.withHome(
-                        homeId=command[WizDeviceCLI._PARAMS][0])
-
-                elif command[WizDeviceCLI._COMMAND] == "room" and command[WizDeviceCLI._PARAMS]:
-
-                    controller.withRoom(
-                        roomId=command[WizDeviceCLI._PARAMS][0])
-
-                elif command[WizDeviceCLI._COMMAND] == "group" and command[WizDeviceCLI._PARAMS]:
-
-                    controller.withGroup(
-                        groupId=command[WizDeviceCLI._PARAMS][0])
-
-                elif command[WizDeviceCLI._COMMAND] == "reset":
-
-                    controller.reset()
-
-                elif command[WizDeviceCLI._COMMAND] == "reboot":
-
-                    controller.reboot()
-
-                elif command[WizDeviceCLI._COMMAND] == "dump":
-
-                    controller.getDevInfo()
-                    controller.getSystemConfig()
-                    controller.getModelConfig()
-                    controller.getUserConfig()
-                    controller.getPilot()
-                    controller.getPower()
-            
             return commands
 
         try:
@@ -1587,6 +1721,9 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
                 self.print(devices=controller.devices,
                            json_=("json" in commands))
+
+            if "listen" in commands:
+                controller.startListener()
 
         except WizDeviceException as ex:
             LOGGER.error(ex.message)
