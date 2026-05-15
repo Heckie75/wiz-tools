@@ -56,6 +56,7 @@ class Features():
 
         self.module_name: str = ""
         self.device_type: str = ""
+        self.type_key: str = ""
 
         self.color: bool = False
         self.white: bool = False
@@ -82,10 +83,10 @@ class Features():
         if len(parts) < 2:
             raise WizDeviceException("invalid format")
 
-        type_key = parts[1]
+        features.type_key = parts[1]
 
         # SHRGBC = Color + Tunable White (Full control)
-        if "RGBC" in type_key:
+        if "RGBC" in features.type_key:
             features.device_type = Features.DEVICE_BULB
             features.color = True
             features.white = True
@@ -93,7 +94,7 @@ class Features():
             features.dimming = True
 
         # SHRGBW = Color + Fixed White (No color temperature control)
-        elif "RGBW" in type_key:
+        elif "RGBW" in features.type_key:
             features.device_type = Features.DEVICE_BULB
             features.color = True
             features.white = False
@@ -101,7 +102,7 @@ class Features():
             features.dimming = True
 
         # SHRGB = Color
-        elif "RGB" in type_key:
+        elif "RGB" in features.type_key:
             features.device_type = Features.DEVICE_BULB
             features.color = True
             features.white = False
@@ -109,20 +110,20 @@ class Features():
             features.dimming = True
 
         # SHDW / SHTW = Only Tunable White
-        elif any(x in type_key for x in ["DW", "TW"]):
+        elif any(x in features.type_key for x in ["DW", "TW"]):
             features.device_type = Features.DEVICE_BULB
             features.temp = True
             features.dimming = True
 
         # SHDIM = Just dimming, fixed temp
-        elif "DIM" in type_key:
+        elif "DIM" in features.type_key:
             features.device_type = Features.DEVICE_BULB
             features.dimming = True
 
         # SOCKETS / PLUGS
-        elif "SOCKET" in type_key or "PL" in type_key:
+        elif "SOCKET" in features.type_key or "PL" in features.type_key:
             features.device_type = Features.DEVICE_SOCKET
-            if "POW" in type_key or "PL" in type_key:
+            if "POW" in features.type_key or "PL" in features.type_key:
                 features.power_meter = True
 
         if Features.DEVICE_STRIP in module_name:
@@ -471,13 +472,14 @@ class Pilot():
     SCENE_HALLOWEEN = 28
     SCENE_CANDLELIGHT = 29
     SCENE_GOLDEN_WHITE = 30
-    SCENE_PULSE = 31
+    SCENE_31 = 31
     SCENE_STEAMPUNK = 32
     SCENE_DIWALI = 33
     SCENE_34 = 34
     SCENE_LIGHT_ALARM = 35
     SCENE_SNOWY_SKY = 36
     SCENE_DIM_TO_WARM = 40
+    SCENE_PULSE = 249
     SCENE_RHYTHM = 1000
 
     SCENES_LIST = [
@@ -519,6 +521,7 @@ class Pilot():
         "Light alarm",
         "Snowy sky",
         "Dim to warm",
+        "Pulse",
         "Rhythm"
     ]
 
@@ -638,7 +641,8 @@ class Pilot():
     def scene_list() -> 'list[str]':
         return [
             f"{s} ({Pilot.SCENE_DIM_TO_WARM})" if i == 37 else
-            f"{s} ({Pilot.SCENE_RHYTHM})" if i == 38 else
+            f"{s} ({Pilot.SCENE_PULSE})" if i == 38 else
+            f"{s} ({Pilot.SCENE_RHYTHM})" if i == 39 else
             f"{s} ({i})"
             for i, s in enumerate(Pilot.SCENES_LIST)
         ]
@@ -647,9 +651,11 @@ class Pilot():
         """Get the human-readable name of a scene based on its integer identifier. Handles special cases for certain scene values and falls back to a predefined list of scene names."""
 
         if self.sceneId == Pilot.SCENE_RHYTHM:
-            return f"Rhythm (Pilot.SCENE_RHYTHM, speed: {self.speed})"
+            return f"Rhythm ({Pilot.SCENE_RHYTHM}, speed: {self.speed})"
+        elif self.sceneId == Pilot.SCENE_PULSE:
+            return f"Pulse ({Pilot.SCENE_PULSE})"
         elif self.sceneId == Pilot.SCENE_DIM_TO_WARM:
-            return f"Dim to Warm (Pilot.SCENE_DIM_TO_WARM, temp: {self.temp}, dimming: {self.dimming})"
+            return f"Dim to Warm ({Pilot.SCENE_DIM_TO_WARM}, temp: {self.temp}, dimming: {self.dimming})"
 
         try:
             return f"{Pilot.SCENES_LIST[self.sceneId]} ({self.sceneId}, speed: {self.speed})"
@@ -707,7 +713,7 @@ class WiZListener():
         """Called when a new Wiz device is discovered during scanning. The device parameter is a WizDevice instance representing the discovered device."""
 
         pass
-    
+
     def onMessage(self, message: str):
         print(message)
 
@@ -822,7 +828,8 @@ class Alias():
             alias for alias, value in self.aliases.items() if label in value
         }
         if ip_addresses:
-            LOGGER.debug("Found IP addresses for aliases: %s", ", ".join(ip_addresses))
+            LOGGER.debug("Found IP addresses for aliases: %s",
+                         ", ".join(ip_addresses))
         else:
             LOGGER.debug("No aliases found")
         return ip_addresses or None
@@ -874,7 +881,7 @@ class WizDeviceController():
 
         try:
             sock.bind(("", WizDeviceController.UDP_PORT))
-            sock.settimeout(0.5)
+            sock.settimeout(1.0)
 
             LOGGER.info(
                 "Listening for Wiz UDP messages on port %s for %s seconds",
@@ -888,11 +895,11 @@ class WizDeviceController():
                     data, addr = sock.recvfrom(4096)
                     payload = data.decode("utf-8")
                     LOGGER.debug(
-                            "<<< Received packet from %s:%s: %s",
-                            addr[0],
-                            addr[1],
-                            payload
-                        )
+                        "<<< Received packet from %s:%s: %s",
+                        addr[0],
+                        addr[1],
+                        payload
+                    )
                     try:
                         message = json.loads(payload)
                     except json.JSONDecodeError:
@@ -912,7 +919,8 @@ class WizDeviceController():
                     LOGGER.error("UDP listener error: %s", ex)
                     break
         except Exception as ex:
-            LOGGER.error("Unable to start UDP listener on port %s: %s", WizDeviceController.UDP_PORT, ex)
+            LOGGER.error("Unable to start UDP listener on port %s: %s",
+                         WizDeviceController.UDP_PORT, ex)
         finally:
             sock.close()
 
@@ -1015,31 +1023,37 @@ class WizDeviceController():
 
         return devices
 
-    def getDevInfo(self) -> None:
+    def getDevInfo(self) -> 'WizDeviceController':
 
         self.commands["getDevInfo"] = {}
+        return self
 
-    def getModelConfig(self) -> None:
+    def getModelConfig(self) -> 'WizDeviceController':
 
         self.commands["getModelConfig"] = {}
+        return self
 
-    def getSystemConfig(self) -> None:
+    def getSystemConfig(self) -> 'WizDeviceController':
 
         self.commands["getSystemConfig"] = {}
+        return self
 
-    def getPower(self) -> None:
+    def getPower(self) -> 'WizDeviceController':
 
         self.commands["getPower"] = {}
+        return self
 
-    def getUserConfig(self) -> None:
+    def getUserConfig(self) -> 'WizDeviceController':
 
         self.commands["getUserConfig"] = {}
+        return self
 
-    def getPilot(self) -> None:
+    def getPilot(self) -> 'WizDeviceController':
 
         self.commands["getPilot"] = {}
+        return self
 
-    def setPilot(self, properties: dict[str, str | int]) -> None:
+    def setPilot(self, properties: dict[str, str | int]) -> 'WizDeviceController':
 
         if self.commands["setPilot"] is None:
             self.commands["setPilot"] = {}
@@ -1047,23 +1061,29 @@ class WizDeviceController():
         for p in properties:
             self.commands["setPilot"][p] = properties[p]
 
-    def withState(self, state: bool) -> None:
+        return self
+
+    def withState(self, state: bool) -> 'WizDeviceController':
 
         self.setPilot(properties={"state": state})
+        return self
 
-    def withTemp(self, temp: int) -> None:
+    def withTemp(self, temp: int) -> 'WizDeviceController':
 
         self.setPilot(properties={"temp": temp})
+        return self
 
-    def withDimming(self, dimming: int) -> None:
+    def withDimming(self, dimming: int) -> 'WizDeviceController':
 
         self.setPilot(properties={"dimming": dimming})
+        return self
 
-    def withColor(self, red: int = 0, green: int = 0, blue: int = 0, white: int = 0) -> None:
+    def withColor(self, red: int = 0, green: int = 0, blue: int = 0, white: int = 0) -> 'WizDeviceController':
 
         self.setPilot(properties={"r": red, "g": green, "b": blue, "w": white})
+        return self
 
-    def withScene(self, scene: str) -> None:
+    def withScene(self, scene: str) -> 'WizDeviceController':
 
         if scene.isdigit():
             sceneId = int(scene)
@@ -1083,50 +1103,59 @@ class WizDeviceController():
                 raise WizDeviceException(f"Unknown scene '{scene}'")
 
         self.setPilot(properties={"sceneId": sceneId})
+        return self
 
-    def withSpeed(self, speed: int) -> None:
+    def withSpeed(self, speed: int) -> 'WizDeviceController':
 
         self.setPilot(properties={"speed": speed})
+        return self
 
-    def withHome(self, homeId: int) -> None:
+    def withHome(self, homeId: int) -> 'WizDeviceController':
 
         self.setPilot(properties={"homeId": homeId})
+        return self
 
-    def withRoom(self, roomId: int) -> None:
+    def withRoom(self, roomId: int) -> 'WizDeviceController':
 
         self.setPilot(properties={"roomId": roomId})
+        return self
 
-    def withGroup(self, groupId: int) -> None:
+    def withGroup(self, groupId: int) -> 'WizDeviceController':
 
         self.setPilot(properties={"groupId": groupId})
+        return self
 
-    def register(self, value: bool = True) -> None:
+    def register(self, value: bool = True) -> 'WizDeviceController':
 
         self.commands["registration"] = {
             "register": value,
             "phoneMac": WizDeviceController.generate_mac(),
-            "phoneIp": self.get_source_ip(),
-            "homeId":19617418
+            "phoneIp": self.get_source_ip()
         }
+        return self
 
-    def unregister(self) -> None:
+    def unregister(self) -> 'WizDeviceController':
 
         self.register(False)
+        return self
 
-    def pulse(self, delta: int = 15, duration: int = 300) -> None:
+    def pulse(self, delta: int = 15, duration: int = 300) -> 'WizDeviceController':
 
         self.commands["pulse"] = {
             "delta": delta,
             "duration": duration
         }
+        return self
 
-    def reboot(self) -> None:
+    def reboot(self) -> 'WizDeviceController':
 
         self.commands["reboot"] = {}
+        return self
 
-    def reset(self) -> None:
+    def reset(self) -> 'WizDeviceController':
 
         self.commands["reset"] = {}
+        return self
 
     def perform(self) -> None:
 
@@ -1185,7 +1214,8 @@ class WizDeviceController():
                         ip_address=device.ip_address, payload=payload)
                     if response and "result" in response:
                         if command == "setPilot" and response["result"].get("success"):
-                            device = device.withPilot(Pilot.from_json(params, pilot=device.pilot))
+                            device = device.withPilot(
+                                Pilot.from_json(params, pilot=device.pilot))
                         else:
                             handler = result_handlers.get(command)
                             if handler:
@@ -1271,7 +1301,8 @@ class WizDeviceCLI():
             _REGEX: r"^%s %s %s( %s)?$" % (_REG_255, _REG_255, _REG_255, _REG_255),
             _TYPES: [int, int, int, int],
             _ACTION: lambda controller, params: controller.withColor(
-                red=params[0], green=params[1], blue=params[2], white=params[3] if len(params) == 4 else 0
+                red=params[0], green=params[1], blue=params[2], white=params[3] if len(
+                    params) == 4 else 0
             ),
         },
         "scene": {
