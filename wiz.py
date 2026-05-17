@@ -226,15 +226,15 @@ class SystemConfig():
         return f"SystemConfig(mac={self.mac}, home_id={self.home_id}, room_id={self.room_id}, region={self.region}, module_name={self.module_name}, firmware_version={self.firmware_version}, group_id={self.group_id}, ping={self.ping}, acc_udp_prop_rate={self.acc_udp_prop_rate})"
 
 
-class WizardConfig():
+class WizConfig():
 
     def __init__(self) -> None:
         self.mode: list[int] = []
         self.opts: dict[str, str | int | bool] = {}
 
     @staticmethod
-    def from_json(json_data: dict[str, str | int | bool | list | dict]) -> 'WizardConfig':
-        config = WizardConfig()
+    def from_json(json_data: dict[str, str | int | bool | list | dict]) -> 'WizConfig':
+        config = WizConfig()
         config.mode = json_data.get("mode", [])
         config.opts = json_data.get("opts", {})
         return config
@@ -246,7 +246,7 @@ class WizardConfig():
         }
 
     def __str__(self):
-        return f"WizardConfig(mode={self.mode}, opts={self.opts})"
+        return f"WizConfig(mode={self.mode}, opts={self.opts})"
 
 
 class I2CDriver():
@@ -303,8 +303,8 @@ class ModelConfig():
         self.nowc: int = 0
         self.cct_range: list[int] = []
         self.render_factor: list[int] = []
-        self.wizc1: WizardConfig | None = None
-        self.wizc2: WizardConfig | None = None
+        self.wizc1: WizConfig | None = None
+        self.wizc2: WizConfig | None = None
         self.drv_iface: int = 0
         self.i2c_drv: list[I2CDriver] = []
 
@@ -330,8 +330,8 @@ class ModelConfig():
         config.nowc = json_data.get("nowc", 0)
         config.cct_range = json_data.get("cctRange", [])
         config.render_factor = json_data.get("renderFactor", [])
-        config.wizc1 = WizardConfig.from_json(json_data.get("wizc1", {}))
-        config.wizc2 = WizardConfig.from_json(json_data.get("wizc2", {}))
+        config.wizc1 = WizConfig.from_json(json_data.get("wizc1", {}))
+        config.wizc2 = WizConfig.from_json(json_data.get("wizc2", {}))
         config.drv_iface = json_data.get("drvIface", 0)
         config.i2c_drv = [I2CDriver.from_json(
             driver) for driver in json_data.get("i2cDrv", [])]
@@ -381,8 +381,8 @@ class UserConfig():
         self.auto_update: int = 0
         self.devices_count: int = 0
         self.dim_to_warm_points: list = []
-        self.wizard_config1: WizardConfig | None = None
-        self.wizard_config2: WizardConfig | None = None
+        self.wizard_config1: WizConfig | None = None
+        self.wizard_config2: WizConfig | None = None
         self.ap_stack_enabled: bool = False
         self.config_timestamp: int = 0
 
@@ -401,9 +401,9 @@ class UserConfig():
         config.auto_update = json_data.get("autoUpd", 0)
         config.devices_count = json_data.get("devices", 0)
         config.dim_to_warm_points = json_data.get("dim2WarmPoints", [])
-        config.wizard_config1 = WizardConfig.from_json(
+        config.wizard_config1 = WizConfig.from_json(
             json_data.get("wizc1", {}))
-        config.wizard_config2 = WizardConfig.from_json(
+        config.wizard_config2 = WizConfig.from_json(
             json_data.get("wizc2", {}))
         config.ap_stack_enabled = json_data.get("apStkEn", False)
         config.config_timestamp = json_data.get("confTs", 0)
@@ -647,6 +647,11 @@ class Pilot():
             for i, s in enumerate(Pilot.SCENES_LIST)
         ]
 
+    @staticmethod
+    def index_to_sceneId(sceneId) -> int:
+
+        return Pilot.SCENE_DIM_TO_WARM if sceneId == 37 else Pilot.SCENE_PULSE if sceneId == 38 else Pilot.SCENE_RHYTHM if sceneId == 39 else sceneId
+
     def scene_str(self) -> str:
         """Get the human-readable name of a scene based on its integer identifier. Handles special cases for certain scene values and falls back to a predefined list of scene names."""
 
@@ -710,12 +715,40 @@ class WiZListener():
     """Listener iWiZnterface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
 
     def onDiscoverFound(self, device: 'WizDevice') -> None:
-        """Called when a new Wiz device is discovered during scanning. The device parameter is a WizDevice instance representing the discovered device."""
 
         pass
 
-    def onMessage(self, message: str):
-        print(message)
+    def onPerformStart(self):
+
+        pass
+
+    def onPerformDeviceStart(self, device: 'WizDevice'):
+
+        pass
+
+    def onPerformMessageSend(self, message: str):
+
+        pass
+
+    def onPerformMessageReceived(self, message: str):
+
+        pass
+
+    def onPerformTimeout(self):
+
+        pass
+
+    def onPerformError(self, exception: Exception):
+
+        pass
+
+    def onPerformDeviceFinished(self, device: 'WizDevice'):
+
+        pass
+
+    def onPerformFinished(self):
+
+        pass
 
 
 class WizDevice():
@@ -911,7 +944,7 @@ class WizDeviceController():
                         continue
 
                     # self.listener.onDiscoverFound(device)
-                    self.listener.onMessage(payload)
+                    self.listener.onMessageReceived(payload)
 
                 except socket.timeout:
                     continue
@@ -1165,22 +1198,41 @@ class WizDeviceController():
 
         def _request(ip_address: str, payload: dict[str, str | int | dict[str, str | int]]):
 
+            dumped_payload = json.dumps(payload)
+
             LOGGER.debug(
-                f">>> Sending message {payload} to {ip_address}:{WizDeviceController.UDP_PORT}")
+                f">>> Sending message {dumped_payload} to {ip_address}:{WizDeviceController.UDP_PORT}")
+
+            if self.listener:
+                self.listener.onPerformMessageSend(dumped_payload)
 
             try:
-                sock.sendto(json.dumps(payload).encode(
+                sock.sendto(dumped_payload.encode(
                     "utf-8"), (ip_address, WizDeviceController.UDP_PORT))
                 data, addr = sock.recvfrom(1024)
-                response = json.loads(data.decode("utf-8"))
+                decoded_data = data.decode("utf-8")
+
                 LOGGER.debug(
-                    f"<<< Received response from {addr[0]}: {response}")
+                    f"<<< Received response from {addr[0]}: {decoded_data}")
+
+                if self.listener:
+                    self.listener.onPerformMessageReceived(decoded_data)
+
+                response = json.loads(decoded_data)
 
             except socket.timeout:
+
+                if self.listener:
+                    self.listener.onPerformTimeout()
+
                 response = {
                     "error": "Timeout while waiting for response from device."}
 
             except Exception as e:
+
+                if self.listener:
+                    self.listener.onPerformError(e)
+
                 LOGGER.error(f"Error during communication: {e}")
                 response = {"error": f"Error during communication: {e}"}
 
@@ -1197,7 +1249,14 @@ class WizDeviceController():
         }
 
         try:
+            if self.listener:
+                self.listener.onPerformStart()
+
             for device in self.devices:
+
+                if self.listener:
+                    self.listener.onPerformDeviceStart(device=device)
+
                 for command, params in self.commands.items():
                     if params is None:
                         continue
@@ -1220,9 +1279,16 @@ class WizDeviceController():
                             handler = result_handlers.get(command)
                             if handler:
                                 device = handler(device, response["result"])
+
+                if self.listener:
+                    self.listener.onPerformDeviceFinished(device=device)
+
         finally:
             sock.close()
             self.resetCommands()
+
+            if self.listener:
+                self.listener.onPerformFinished()
 
 
 class WizDeviceCLI():
