@@ -711,46 +711,6 @@ class Power():
         return f"Power(power={self.power})"
 
 
-class WiZListener():
-    """Listener iWiZnterface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
-
-    def onDiscoverFound(self, device: 'WizDevice') -> None:
-
-        pass
-
-    def onPerformStart(self):
-
-        pass
-
-    def onPerformDeviceStart(self, device: 'WizDevice'):
-
-        pass
-
-    def onPerformMessageSend(self, message: str):
-
-        pass
-
-    def onPerformMessageReceived(self, message: str):
-
-        pass
-
-    def onPerformTimeout(self):
-
-        pass
-
-    def onPerformError(self, exception: Exception):
-
-        pass
-
-    def onPerformDeviceFinished(self, device: 'WizDevice'):
-
-        pass
-
-    def onPerformFinished(self):
-
-        pass
-
-
 class WizDevice():
     """Represents a single Wiz device with its properties and state."""
 
@@ -816,6 +776,36 @@ class WizDevice():
         return f"WizDevice(ip_address={self.ip_address}, device_info={self.device_info}, system_config={self.system_config}, model_config={self.model_config}, user_config={self.user_config}, pilot={self.pilot}, power={self.power})"
 
 
+class WiZListener():
+    """Listener WiZnterface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
+
+    def onStart(self):
+
+        LOGGER.debug("start processing")
+
+    def onMessageSend(self, ip_address: str, message: str):
+
+        LOGGER.debug(f">>> message send to {ip_address}: {message}")
+
+    def onMessageReceived(self, ip_address: str, message: str):
+
+        LOGGER.debug(f"<<< message received from {ip_address}: {message}")
+
+    def onError(self, ip_address: str, exception: Exception):
+
+        LOGGER.debug(f"Error while comminicating weith {ip_address}: {exception}")
+
+    def onDevicesHandled(self, devices: list[WizDevice]):
+
+        output = "\n".join([str(d) for d in devices])
+
+        LOGGER.debug(f"Devices handled: \n{output}")
+
+    def onFinished(self):
+
+        LOGGER.debug("end processing")
+
+
 class Alias():
     """Manages aliases for Wiz devices, allowing users to associate human-readable names with device IP addresses. Aliases are loaded from a file and can be resolved to IP addresses."""
 
@@ -878,35 +868,37 @@ class WizDeviceController():
 
     UDP_PORT = 38899
 
-    def __init__(self, addresses: 'list[str]', listener: WiZListener = None) -> None:
+    _RESULT_HANDLERS = {
+        "getDevInfo": lambda device, result: device.withDeviceInfo(DeviceInfo.from_json(result)),
+        "getSystemConfig": lambda device, result: device.withSystemConfig(SystemConfig.from_json(result)),
+        "getModelConfig": lambda device, result: device.withModelConfig(ModelConfig.from_json(result)),
+        "getUserConfig": lambda device, result: device.withUserConfig(UserConfig.from_json(result)),
+        "getPilot": lambda device, result: device.withPilot(Pilot.from_json(result)),
+        "getPower": lambda device, result: device.withPower(Power.from_json(result)),
+        "pulse": lambda device, result: device,
+    }
 
-        self.addresses: 'list[str]' = addresses
-        self.devices: 'list[WizDevice]' = [
-            WizDevice(ip_address=a) for a in addresses]
+    def __init__(self, ip_addresses: 'list[str]', listener: WiZListener = None) -> None:
+
+        self.ip_addresses: 'list[str]' = ip_addresses
+        self.devices: 'list[WizDevice]' = list()
 
         self.listener = listener
-        self.listener_duration: int = 0
 
         self.commands: dict[str, dict] = None
         self.resetCommands()
 
         self.requestId: int = 0
 
-    def withListener(self, listener: WiZListener, duration: int) -> None:
-        """Configure the UDP listener duration in seconds."""
-
-        self.listener = listener
-        self.listener_duration = int(duration)
-
-    def startListener(self) -> None:
+    def startListener(self, listener: WiZListener, duration: int = 60) -> None:
         """Listen for incoming Wiz UDP messages and forward events to the configured listener."""
 
-        if not self.listener:
+        if not listener:
             LOGGER.warning("No listener configured for UDP listen mode")
             return
 
-        if self.listener_duration <= 0:
-            LOGGER.warning("Listener duration must be greater than 0 seconds")
+        if duration <= 0:
+            LOGGER.warning("Duration must be greater than 0 seconds")
             return
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -919,10 +911,10 @@ class WizDeviceController():
             LOGGER.info(
                 "Listening for Wiz UDP messages on port %s for %s seconds",
                 WizDeviceController.UDP_PORT,
-                self.listener_duration,
+                duration,
             )
 
-            stop_time = time.monotonic() + self.listener_duration
+            stop_time = time.monotonic() + duration
             while time.monotonic() < stop_time:
                 try:
                     data, addr = sock.recvfrom(4096)
@@ -943,14 +935,15 @@ class WizDeviceController():
                         )
                         continue
 
-                    # self.listener.onDiscoverFound(device)
-                    self.listener.onMessageReceived(payload)
+                    listener.onMessageReceived(ip_address=addr[0], message=message)
 
                 except socket.timeout:
                     continue
+
                 except Exception as ex:
                     LOGGER.error("UDP listener error: %s", ex)
                     break
+
         except Exception as ex:
             LOGGER.error("Unable to start UDP listener on port %s: %s",
                          WizDeviceController.UDP_PORT, ex)
@@ -962,13 +955,13 @@ class WizDeviceController():
         test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         test_sock.setblocking(False)  # must be non-blocking for async
         try:
-            test_sock.connect((self.devices[0].ip_address, 1))
+            test_sock.connect(('8.8.8.8', 1))
             source_ip = test_sock.getsockname()[0]
             return source_ip
         except Exception:
             LOGGER.debug(
                 "The system could not auto detect the source ip for %s on your operating system",
-                self.devices[0].ip_address,
+                "8.8.8.8",
             )
             return None
         finally:
@@ -1014,47 +1007,6 @@ class WizDeviceController():
             "setPilot": None,
             "pulse": None
         }
-
-    @staticmethod
-    def discover_wiz_devices(broadcast_address="255.255.255.255", timeout=1, listener: WiZListener = None) -> 'list[WizDevice]':
-        """Discover Wiz devices on the local network by sending a UDP broadcast message and listening for responses. Returns a list of discovered WizDevice instances."""
-
-        discovery_message = {"method": "getSystemConfig", "params": {}}
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(('', WizDeviceController.UDP_PORT))
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.settimeout(timeout)
-
-        devices = []
-
-        try:
-            LOGGER.debug(
-                f"Sending discovery message to {broadcast_address}:{WizDeviceController.UDP_PORT}")
-            sock.sendto(json.dumps(discovery_message).encode(
-                'utf-8'), (broadcast_address, WizDeviceController.UDP_PORT))
-
-            while True:
-                try:
-                    data, addr = sock.recvfrom(1024)
-                    response = json.loads(data.decode('utf-8'))
-
-                    if "result" in response:
-                        device = WizDevice(ip_address=addr[0]).withSystemConfig(
-                            SystemConfig.from_json(response["result"]))
-                        devices.append(device)
-                        if listener:
-                            listener.onDiscoverFound(device)
-                        LOGGER.debug(f"Device found: {device}")
-                except socket.timeout:
-                    break
-
-        except Exception as e:
-            LOGGER.error(f"Error during discovery: {e}")
-        finally:
-            sock.close()
-
-        return devices
 
     def getDevInfo(self) -> 'WizDeviceController':
 
@@ -1190,105 +1142,117 @@ class WizDeviceController():
         self.commands["reset"] = {}
         return self
 
-    def perform(self) -> None:
+    def _get_device_for_ip_address(self, ip_address: str) -> 'WizDevice':
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.settimeout(.5)
+        for device in self.devices:
+            if device.ip_address == ip_address:
+                return device
 
-        def _request(ip_address: str, payload: dict[str, str | int | dict[str, str | int]]):
+        new_device = WizDevice(ip_address=ip_address)
+        self.devices.append(new_device)
+        return new_device
 
-            dumped_payload = json.dumps(payload)
+    def perform(self, timeout: float = 1) -> None:
+
+        def handle_responses(command: str, responses: dict[str, dict]):
+
+            if not responses:
+                return
+
+            for remote_ip in responses:
+
+                device = self._get_device_for_ip_address(remote_ip)
+                for response in responses[remote_ip]:
+                    json_response = json.loads(response)
+                    if "result" in json_response:
+                        if command == "setPilot" and json_response["result"].get("success"):
+                            device = device.withPilot(
+                                Pilot.from_json(params, pilot=device.pilot))
+                        else:
+                            handler = WizDeviceController._RESULT_HANDLERS.get(
+                                command)
+                            if handler:
+                                device = handler(
+                                    device, json_response["result"])
+
+        def request(ip_address: str, payload: str, timeout: float) -> dict[str, list[str]]:
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.settimeout(timeout)
+            sock.bind(('', WizDeviceController.UDP_PORT))
 
             LOGGER.debug(
-                f">>> Sending message {dumped_payload} to {ip_address}:{WizDeviceController.UDP_PORT}")
+                f">>> Sending message {payload} to {ip_address}:{WizDeviceController.UDP_PORT}")
 
             if self.listener:
-                self.listener.onPerformMessageSend(dumped_payload)
+                self.listener.onMessageSend(
+                    ip_address=ip_address, message=payload)
 
+            responses: dict[str, list[str]] = dict()
             try:
-                sock.sendto(dumped_payload.encode(
+                sock.sendto(payload.encode(
                     "utf-8"), (ip_address, WizDeviceController.UDP_PORT))
-                data, addr = sock.recvfrom(1024)
-                decoded_data = data.decode("utf-8")
 
-                LOGGER.debug(
-                    f"<<< Received response from {addr[0]}: {decoded_data}")
+                while True:
+                    data, addr = sock.recvfrom(1024)
+                    decoded_data = data.decode("utf-8")
 
-                if self.listener:
-                    self.listener.onPerformMessageReceived(decoded_data)
+                    LOGGER.debug(
+                        f"<<< Received response from {addr[0]}: {decoded_data}")
 
-                response = json.loads(decoded_data)
+                    if self.listener:
+                        self.listener.onMessageReceived(
+                            ip_address=addr[0], message=decoded_data)
 
-            except socket.timeout:
+                    if addr[0] in responses:
+                        responses[addr[0]].append(decoded_data)
+                    else:
+                        responses[addr[0]] = [decoded_data]
 
-                if self.listener:
-                    self.listener.onPerformTimeout()
-
-                response = {
-                    "error": "Timeout while waiting for response from device."}
+                    # if not a broadcast there won't be other messages
+                    if not ip_address.endswith(".255"):
+                        break
 
             except Exception as e:
 
                 if self.listener:
-                    self.listener.onPerformError(e)
+                    self.listener.onError(
+                        ip_address=ip_address, exception=e)
 
-                LOGGER.error(f"Error during communication: {e}")
-                response = {"error": f"Error during communication: {e}"}
+            finally:
+                sock.close()
 
-            return response
+            return responses
 
-        result_handlers = {
-            "getDevInfo": lambda device, result: device.withDeviceInfo(DeviceInfo.from_json(result)),
-            "getSystemConfig": lambda device, result: device.withSystemConfig(SystemConfig.from_json(result)),
-            "getModelConfig": lambda device, result: device.withModelConfig(ModelConfig.from_json(result)),
-            "getUserConfig": lambda device, result: device.withUserConfig(UserConfig.from_json(result)),
-            "getPilot": lambda device, result: device.withPilot(Pilot.from_json(result)),
-            "getPower": lambda device, result: device.withPower(Power.from_json(result)),
-            "pulse": lambda device, result: device,
-        }
+        if self.listener:
+            self.listener.onStart()
 
-        try:
-            if self.listener:
-                self.listener.onPerformStart()
+        for ip_address in self.ip_addresses:
 
-            for device in self.devices:
+            for command, params in self.commands.items():
+                if params is None:
+                    continue
 
-                if self.listener:
-                    self.listener.onPerformDeviceStart(device=device)
+                self.requestId += 1
+                payload = {
+                    "version": 1,
+                    "method": command,
+                    "id": self.requestId,
+                    "params": params
+                }
 
-                for command, params in self.commands.items():
-                    if params is None:
-                        continue
-
-                    self.requestId += 1
-                    payload = {
-                        "version": 1,
-                        "method": command,
-                        "id": self.requestId,
-                        "params": params
-                    }
-
-                    response = _request(
-                        ip_address=device.ip_address, payload=payload)
-                    if response and "result" in response:
-                        if command == "setPilot" and response["result"].get("success"):
-                            device = device.withPilot(
-                                Pilot.from_json(params, pilot=device.pilot))
-                        else:
-                            handler = result_handlers.get(command)
-                            if handler:
-                                device = handler(device, response["result"])
-
-                if self.listener:
-                    self.listener.onPerformDeviceFinished(device=device)
-
-        finally:
-            sock.close()
-            self.resetCommands()
+                responses = request(
+                    ip_address=ip_address, payload=json.dumps(payload), timeout=timeout)
+                handle_responses(command=command, responses=responses)
 
             if self.listener:
-                self.listener.onPerformFinished()
+                self.listener.onDevicesHandled(devices=self.devices)
+
+        if self.listener:
+            self.listener.onFinished()
+
+        self.resetCommands()
 
 
 class WizDeviceCLI():
@@ -1411,7 +1375,7 @@ class WizDeviceCLI():
             _DESCR: "Listen to broadvcast messages and print them",
             _REGEX: r"^(\d+)$",
             _TYPES: [int],
-            _ACTION: lambda controller, params: controller.withListener(listener=WiZListener(), duration=params[0]) if params else None,
+            _ACTION: lambda controller, params: controller.startListener(listener=WiZListener(), duration=params[0]) if params else None,
         },
         "reset": {
             _USAGE: "--reset",
@@ -1523,10 +1487,11 @@ class WizDeviceCLI():
                 print(str(self.alias))
 
             else:
-                addresses, cliCommands = self.parse_args(sys.argv)
-                if addresses and cliCommands:
-                    self.process(addresses=addresses, cliCommands=cliCommands)
-                elif not addresses:
+                ip_addresses, cliCommands = self.parse_args(sys.argv)
+                if ip_addresses and cliCommands:
+                    self.process(ip_addresses=ip_addresses,
+                                 cliCommands=cliCommands)
+                elif not ip_addresses:
                     raise WizDeviceException(
                         message="Mac address or alias unknown")
 
@@ -1574,16 +1539,22 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
             def __init__(self, alias: Alias) -> None:
                 self.alias: Alias = alias
-                self._seen: 'set[WizDevice]' = set()
 
-            def onDiscoverFound(self, device: WizDevice) -> None:
-                alias = self.alias.aliases[device.ip_address] if self.alias and device.ip_address in self.alias.aliases else ""
-                print(
-                    f"{WizDevice.formatted_mac(device.system_config.mac)}\t{device.ip_address}\t{device.system_config.module_name}\t{device.system_config.home_id}\t{device.system_config.room_id}\t{device.system_config.group_id}\t{alias}", flush=True)
+            def onStart(self):
+                print("MAC\t\tIP Address\tModule\tHome\tRoom\tGroup\tAlias", flush=True)
 
-        print("MAC\t\tIP Address\tModule\tHome\tRoom\tGroup\tAlias", flush=True)
-        WizDeviceController.discover_wiz_devices(
-            broadcast_address="255.255.255.255", listener=ScanListener(self.alias))
+            def onDevicesHandled(self, devices: list[WizDevice]):
+
+                for device in devices:
+                    if not device.system_config:
+                        continue
+
+                    alias = self.alias.aliases[device.ip_address] if self.alias and device.ip_address in self.alias.aliases else ""
+                    print(f"{WizDevice.formatted_mac(device.system_config.mac)}\t{device.ip_address}\t{device.system_config.module_name}\t{device.system_config.home_id}\t{device.system_config.room_id}\t{device.system_config.group_id}\t{alias}", flush=True)
+
+        controller = WizDeviceController(
+            ip_addresses=["255.255.255.255"], listener=ScanListener(alias=self.alias))
+        controller.getSystemConfig().perform()
 
     def print_help(self):
 
@@ -1790,7 +1761,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
         print()
 
-    def process(self, addresses: 'list[str]', cliCommands: 'list[dict]') -> None:
+    def process(self, ip_addresses: 'list[str]', cliCommands: 'list[dict]') -> None:
 
         def buildRequsts(controller: WizDeviceController, cliCommands: 'list[dict]') -> list[str]:
 
@@ -1808,7 +1779,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
         try:
             controller = WizDeviceController(
-                addresses=addresses, listener=WiZListener())
+                ip_addresses=ip_addresses, listener=WiZListener())
 
             commands = buildRequsts(controller, cliCommands)
 
@@ -1818,9 +1789,6 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
 
                 self.print(devices=controller.devices,
                            json_=("json" in commands))
-
-            if "listen" in commands:
-                controller.startListener()
 
         except WizDeviceException as ex:
             LOGGER.error(ex.message)
