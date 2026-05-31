@@ -1,13 +1,15 @@
 #!/usr/bin/python3
+import hashlib
 import json
 import logging
 import os
+import random
 import re
 import platform
+import signal
 import socket
-import sys
-import hashlib
 import subprocess
+import sys
 import time
 import uuid
 
@@ -66,16 +68,18 @@ class Features():
 
     def getFeaturesDescription(self) -> str:
 
+        module_name_upper = self.module_name.upper()
         for feature in Features.FEATURES:
-            if f"_{feature}_" in self.module_name:
+            if f"_{feature}_" in module_name_upper:
                 return f"{Features.FEATURES[feature]} ({feature})"
 
         return "unknown"
 
     @staticmethod
-    def fromModuleName(module_name) -> 'Features':
+    def fromModuleName(module_name: str) -> 'Features':
 
-        parts = module_name.upper().split('_')
+        module_name_upper = module_name.upper()
+        parts = module_name_upper.split('_')
 
         features: Features = Features()
         features.module_name = module_name
@@ -121,12 +125,12 @@ class Features():
             features.dimming = True
 
         # SOCKETS / PLUGS
-        elif "SOCKET" in features.type_key or "PL" in features.type_key:
+        elif Features.DEVICE_SOCKET in features.type_key or "PL" in features.type_key:
             features.device_type = Features.DEVICE_SOCKET
             if "POW" in features.type_key or "PL" in features.type_key:
                 features.power_meter = True
 
-        if Features.DEVICE_STRIP in module_name:
+        if Features.DEVICE_STRIP in module_name_upper:
             features.device_type = Features.DEVICE_STRIP
 
         return features
@@ -441,96 +445,48 @@ class Pilot():
     WHITE_DAYLIGHT = 4200
     WHITE_COLD = 6500
 
-    SCENE_COLORS = 0
-    SCENE_OCEAN = 1
-    SCENE_ROMANCE = 2
-    SCENE_SUNSET = 3
-    SCENE_PARTY = 4
-    SCENE_FIREPLACE = 5
-    SCENE_COZY = 6
-    SCENE_FOREST = 7
-    SCENE_PASTEL_COLORS = 8
-    SCENE_WAKE_UP = 9
-    SCENE_BEDTIME = 10
-    SCENE_WARM_WHITE = 11
-    SCENE_DAYLIGHT = 12
-    SCENE_COOL_WHITE = 13
-    SCENE_NIGHT_LIGHT = 14
-    SCENE_FOCUS = 15
-    SCENE_RELAX = 16
-    SCENE_TRUE_COLORS = 17
-    SCENE_TV_TIME = 18
-    SCENE_PLANT_GROWTH = 19
-    SCENE_SPRING = 20
-    SCENE_SUMMER = 21
-    SCENE_FALL = 22
-    SCENE_DEEP_DIVE = 23
-    SCENE_JUNGLE = 24
-    SCENE_MOJITO = 25
-    SCENE_CLUB = 26
-    SCENE_CHRISTMAS = 27
-    SCENE_HALLOWEEN = 28
-    SCENE_CANDLELIGHT = 29
-    SCENE_GOLDEN_WHITE = 30
-    SCENE_31 = 31
-    SCENE_STEAMPUNK = 32
-    SCENE_DIWALI = 33
-    SCENE_34 = 34
-    SCENE_LIGHT_ALARM = 35
-    SCENE_SNOWY_SKY = 36
-    SCENE_DIM_TO_WARM = 40
-    SCENE_PULSE = 249
-    SCENE_RHYTHM = 1000
-
-    SCENES_LIST = [
-        "Colors",
-        "Ocean",
-        "Romance",
-        "Sunset",
-        "Party",
-        "Fireplace",
-        "Cozy",
-        "Forest",
-        "Pastel Colors",
-        "Wakeup",
-        "Bedtime",
-        "Warm White",
-        "Daylight",
-        "Cool White",
-        "Night light",
-        "Focus",
-        "Relax",
-        "True colors",
-        "TV time",
-        "Plant growth",
-        "Spring",
-        "Summer",
-        "Fall",
-        "Deep dive",
-        "Jungle",
-        "Mojito",
-        "Club",
-        "Christmas",
-        "Halloween",
-        "Candlelight",
-        "Golden white",
-        "Pulse",
-        "Steampunk",
-        "Diwali",
-        "(unknown)",
-        "Light alarm",
-        "Snowy sky",
-        "Dim to warm",
-        "Pulse",
-        "Rhythm"
-    ]
-
-    SCENE_HAS_DIMMING = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 15, 16,
-                         17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 36]
-    SCENE_HAS_SPEED = [1, 2, 3, 4, 5, 8, 20, 21, 22,
-                       23, 24, 25, 26, 27, 28, 31, 32, 33, 36]
-    SCENE_HAS_RGB = [0]
-    SCENE_HAS_TEMPERATURE = [0, 11, 12, 13, 40]
+    SCENES = {
+        11: {"name": "warm white", "dimming": True, "speed": False, "rgb": False, "temp": True},
+        17: {"name": "true colors", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        12: {"name": "daylight", "dimming": True, "speed": False, "rgb": False, "temp": True},
+        13: {"name": "cool white", "dimming": True, "speed": False, "rgb": False, "temp": True},
+        30: {"name": "golden white", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        15: {"name": "focus", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        16: {"name": "relax", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        2: {"name": "romance", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        6: {"name": "cozy", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        26: {"name": "club", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        29: {"name": "candlelight", "dimming": False, "speed": False, "rgb": False, "temp": False},
+        5: {"name": "fireplace", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        18: {"name": "tv time", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        10: {"name": "bedtime", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        14: {"name": "night light", "dimming": False, "speed": False, "rgb": False, "temp": False},
+        3: {"name": "sunset", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        9: {"name": "wakeup", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        20: {"name": "spring", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        21: {"name": "summer", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        22: {"name": "fall", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        36: {"name": "snowy sky", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        23: {"name": "deep dive", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        1: {"name": "ocean", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        7: {"name": "forest", "dimming": False, "speed": False, "rgb": False, "temp": False},
+        24: {"name": "jungle", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        25: {"name": "mojito", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        19: {"name": "plant growth", "dimming": True, "speed": False, "rgb": False, "temp": False},
+        28: {"name": "halloween", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        27: {"name": "christmas", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        4: {"name": "party", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        8: {"name": "pastel Colors", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        32: {"name": "steampunk", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        33: {"name": "diwali", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        35: {"name": "light alarm", "dimming": False, "speed": False, "rgb": False, "temp": False},
+        31: {"name": "pulse", "dimming": True, "speed": True, "rgb": False, "temp": False},
+        0: {"name": "colors", "dimming": False, "speed": False, "rgb": True, "temp": True},
+        40: {"name": "dim to warm", "dimming": False, "speed": False, "rgb": False, "temp": True},
+        34: {"name": "(unknown)", "dimming": False, "speed": False, "rgb": False, "temp": False},
+        249: {"name": "pulse", "dimming": False, "speed": False, "rgb": False, "temp": False},
+        1000: {"name": "rhythm", "dimming": False, "speed": False, "rgb": False, "temp": False}
+    }
 
     def __init__(self) -> None:
 
@@ -539,6 +495,7 @@ class Pilot():
         self.r: int = 0
         self.g: int = 0
         self.b: int = 0
+        self.w: int = 0
         self.dimming: int = 0
 
         self.sceneId: int = 0
@@ -547,6 +504,8 @@ class Pilot():
         self.rssi: int = 0
         self.mac: str = None
 
+        self._provided_fields: set[str] = set()
+
     @staticmethod
     def from_json(json_data: dict[str, str | int | bool], pilot: 'Pilot' = None) -> 'Pilot':
         """Factory method to create a Pilot instance from a JSON response dictionary."""
@@ -554,38 +513,51 @@ class Pilot():
         pilot = pilot or Pilot()
         if "state" in json_data:
             pilot.state = json_data["state"]
+            pilot._provided_fields.add("state")
 
         if "temp" in json_data:
             pilot.temp = json_data["temp"]
+            pilot._provided_fields.add("temp")
 
         if "r" in json_data:
             pilot.r = json_data["r"]
+            pilot._provided_fields.add("r")
 
         if "g" in json_data:
             pilot.g = json_data["g"]
+            pilot._provided_fields.add("g")
 
         if "b" in json_data:
             pilot.b = json_data["b"]
+            pilot._provided_fields.add("b")
+
+        if "w" in json_data:
+            pilot.w = json_data["w"]
+            pilot._provided_fields.add("w")
 
         if "dimming" in json_data:
             pilot.dimming = json_data["dimming"]
+            pilot._provided_fields.add("dimming")
 
         if "sceneId" in json_data:
             pilot.sceneId = json_data["sceneId"]
+            pilot._provided_fields.add("sceneId")
 
         if "speed" in json_data:
             pilot.speed = json_data["speed"]
+            pilot._provided_fields.add("speed")
 
         if "rssi" in json_data:
             pilot.rssi = json_data["rssi"]
+            pilot._provided_fields.add("rssi")
 
         if "mac" in json_data:
             pilot.mac = json_data["mac"]
+            pilot._provided_fields.add("mac")
 
         return pilot
 
     def isOff(self) -> bool | None:
-        """Determine if the light is off based on its state and color values. A light is considered off if its state is False or if all color values (red, green, blue, and temperature) are zero."""
 
         return not self.state if self.state is not None else None
 
@@ -639,31 +611,13 @@ class Pilot():
 
     @staticmethod
     def scene_list() -> 'list[str]':
-        return [
-            f"{s} ({Pilot.SCENE_DIM_TO_WARM})" if i == 37 else
-            f"{s} ({Pilot.SCENE_PULSE})" if i == 38 else
-            f"{s} ({Pilot.SCENE_RHYTHM})" if i == 39 else
-            f"{s} ({i})"
-            for i, s in enumerate(Pilot.SCENES_LIST)
-        ]
-
-    @staticmethod
-    def index_to_sceneId(sceneId) -> int:
-
-        return Pilot.SCENE_DIM_TO_WARM if sceneId == 37 else Pilot.SCENE_PULSE if sceneId == 38 else Pilot.SCENE_RHYTHM if sceneId == 39 else sceneId
+        return [Pilot.SCENES.get(sceneId).get("name") for sceneId in Pilot.SCENES]
 
     def scene_str(self) -> str:
         """Get the human-readable name of a scene based on its integer identifier. Handles special cases for certain scene values and falls back to a predefined list of scene names."""
 
-        if self.sceneId == Pilot.SCENE_RHYTHM:
-            return f"Rhythm ({Pilot.SCENE_RHYTHM}, speed: {self.speed})"
-        elif self.sceneId == Pilot.SCENE_PULSE:
-            return f"Pulse ({Pilot.SCENE_PULSE})"
-        elif self.sceneId == Pilot.SCENE_DIM_TO_WARM:
-            return f"Dim to Warm ({Pilot.SCENE_DIM_TO_WARM}, temp: {self.temp}, dimming: {self.dimming})"
-
         try:
-            return f"{Pilot.SCENES_LIST[self.sceneId]} ({self.sceneId}, speed: {self.speed})"
+            return f"{Pilot.SCENES.get(self.sceneId).get("name")} ({self.sceneId}, speed: {self.speed})"
 
         except IndexError:
             return "Unknown Scene"
@@ -676,6 +630,7 @@ class Pilot():
             "r": self.r,
             "g": self.g,
             "b": self.b,
+            "w": self.w,
             "dimming": self.dimming,
             "sceneId": self.sceneId,
             "speed": self.speed,
@@ -683,8 +638,28 @@ class Pilot():
             "mac": self.mac
         }
 
+    def to_payload(self) -> dict[str, str | int | bool]:
+        """Return only the fields that were explicitly provided, suitable for setPilot payloads."""
+
+        payload = {}
+        for key in ["state", "temp", "r", "g", "b", "w", "dimming", "sceneId", "speed"]:
+            if key in self._provided_fields:
+                payload[key] = getattr(self, key)
+
+        return payload
+
+    def equals(self, second: 'Pilot') -> bool:
+
+        if self is second:
+            return True
+
+        if second is None:
+            return False
+
+        return self.to_dict() == second.to_dict()
+
     def __str__(self):
-        return f"Pilot(state={self.state}, temp={self.temp}, r={self.r}, g={self.g}, b={self.b}, dimming={self.dimming}, sceneId={self.sceneId}, speed={self.speed}, rssi={self.rssi}, mac={self.mac})"
+        return f"Pilot(state={self.state}, temp={self.temp}, r={self.r}, g={self.g}, b={self.b}, w={self.w}, dimming={self.dimming}, sceneId={self.sceneId}, speed={self.speed}, rssi={self.rssi}, mac={self.mac})"
 
 
 class Power():
@@ -777,7 +752,6 @@ class WizDevice():
 
 
 class WiZListener():
-    """Listener WiZnterface for handling events related to Wiz device discovery and connection. Users can subclass this to implement custom behavior on events."""
 
     def onStart(self, ip_addresses: list[str], commands: dict[str, dict]):
 
@@ -804,7 +778,6 @@ class WiZListener():
 
 
 class Alias():
-    """Manages aliases for Wiz devices, allowing users to associate human-readable names with device IP addresses. Aliases are loaded from a file and can be resolved to IP addresses."""
 
     _KNOWN_DEVICES_FILE = ".known_wizs"
     IP_PATTERN = r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
@@ -832,7 +805,6 @@ class Alias():
             LOGGER.error(f"Error while loading known devices file: {e}")
 
     def resolve(self, label: str) -> 'set[str]':
-        """Resolve a label to a set of IP addresses. If the label is an IP address, it is returned as a single-item set. If the label is an alias, all associated IP addresses are returned. If no matches are found, None is returned."""
 
         if re.match(Alias.IP_PATTERN, label):
             return {label} if label else None
@@ -855,7 +827,6 @@ class Alias():
         return ip_addresses or None
 
     def __str__(self) -> str:
-        """String representation of the Alias instance, showing all known aliases and their associated IP addresses."""
 
         return "\n".join([f"{a}\t{self.aliases[a]}" for a in self.aliases])
 
@@ -906,10 +877,7 @@ class WizDeviceController():
             sock.settimeout(1.0)
 
             LOGGER.info(
-                "Listening for Wiz UDP messages on port %s for %s seconds",
-                WizDeviceController.UDP_PORT,
-                duration,
-            )
+                f"Listening for Wiz UDP messages on port {WizDeviceController.UDP_PORT} for {duration} seconds")
 
             stop_time = time.monotonic() + duration
             while time.monotonic() < stop_time:
@@ -917,19 +885,12 @@ class WizDeviceController():
                     data, addr = sock.recvfrom(4096)
                     payload = data.decode("utf-8")
                     LOGGER.debug(
-                        "<<< Received packet from %s:%s: %s",
-                        addr[0],
-                        addr[1],
-                        payload
-                    )
+                        f"<<< Received packet from {addr[0]}:{addr[1]}: {payload}")
                     try:
                         message = json.loads(payload)
                     except json.JSONDecodeError:
                         LOGGER.debug(
-                            "Received non-JSON UDP packet from %s:%s",
-                            addr[0],
-                            addr[1],
-                        )
+                            f"Received non-JSON UDP packet from {addr[0]}:{addr[1]}")
                         continue
 
                     listener.onMessageReceived(
@@ -939,12 +900,12 @@ class WizDeviceController():
                     continue
 
                 except Exception as ex:
-                    LOGGER.error("UDP listener error: %s", ex)
+                    LOGGER.error(f"UDP listener error: {ex}")
                     break
 
         except Exception as ex:
-            LOGGER.error("Unable to start UDP listener on port %s: %s",
-                         WizDeviceController.UDP_PORT, ex)
+            LOGGER.error(
+                f"Unable to start UDP listener on port {WizDeviceController.UDP_PORT}: {ex}")
         finally:
             sock.close()
 
@@ -958,9 +919,7 @@ class WizDeviceController():
             return source_ip
         except Exception:
             LOGGER.debug(
-                "The system could not auto detect the source ip for %s on your operating system",
-                "8.8.8.8",
-            )
+                "The system could not auto detect the source ip for 8.8.8.8 on your operating system")
             return None
         finally:
             test_sock.close()
@@ -1042,6 +1001,10 @@ class WizDeviceController():
             self.commands["setPilot"] = {}
 
         for p in properties:
+            if p not in ["state", "temp", "r", "g", "b", "dimming", "sceneId", "speed"]:
+                continue
+            if p in ["temp", "speed", "dimming", "sceneId"] and properties[p] == 0:
+                continue
             self.commands["setPilot"][p] = properties[p]
 
         return self
@@ -1071,19 +1034,10 @@ class WizDeviceController():
         if scene.isdigit():
             sceneId = int(scene)
         else:
-            normalized_scene = scene.strip().lower().replace("-", " ")
-            scene_map = {
-                s.lower(): i
-                for i, s in enumerate(Pilot.SCENES_LIST)
-            }
-            if normalized_scene in scene_map:
-                sceneId = scene_map[normalized_scene]
-            elif normalized_scene == "dim to warm":
-                sceneId = Pilot.SCENE_DIM_TO_WARM
-            elif normalized_scene == "rhythm":
-                sceneId = Pilot.SCENE_RHYTHM
-            else:
+            _sceneIds = [sceneId for sceneId in Pilot.SCENES if Pilot.SCENES.get(sceneId, None).get("name") == scene]
+            if not _sceneIds:
                 raise WizDeviceException(f"Unknown scene '{scene}'")
+            sceneId = _sceneIds[0]
 
         self.setPilot(properties={"sceneId": sceneId})
         return self
@@ -1250,6 +1204,430 @@ class WizDeviceController():
 
         self.resetCommands()
 
+    def __str__(self):
+        return f"WizDeviceController(ip_addresses={self.ip_addresses}, commands={self.commands}, devices={self.devices})"
+
+
+class Program():
+
+    _BEGIN = 0
+    _END = -1
+
+    PROGRAM_INTERVAL = "interval"
+    PROGRAM_FADE = "fade"
+    PROGRAM_WAKEUP = "wakeup"
+    PROGRAM_DOZE = "doze"
+    PROGRAM_AMBIENT = "ambient"
+    PROGRAM_RGB = "rgb"
+    PROGRAM_GBR = "gbr"
+    PROGRAM_BRG = "brg"
+    PROGRAM_BGR = "bgr"
+    PROGRAM_RBG = "rbg"
+    PROGRAM_GRB = "grb"
+    PROGRAM_RANDOM = "random"
+    PROGRAM_INFINITE = "infinite"
+    PROGRAM_WARM_TO_COLD = "warm-to-cold"
+    PROGRAM_COLD_TO_WARM = "cold-to-warm"
+    PROGRAM_SUNRISE = "sunrise"
+    PROGRAM_SUNSET = "sunset"
+    PROGRAM_SUNRISE_SUNSET = "sunrise-sunset"
+
+    PROGRAMS_STARTING_FROM_CURRENT = [
+        PROGRAM_FADE, PROGRAM_DOZE, PROGRAM_AMBIENT]
+
+    PROGRAMS = {
+        PROGRAM_INTERVAL: {
+            _BEGIN: {"state": True},
+            _END: {"state": False}
+        },
+        PROGRAM_FADE: {
+            _BEGIN: {"state": True, "dimming": 0},
+            _END: {"state": False, "dimming": 10}
+        },
+        PROGRAM_WAKEUP: {
+            _BEGIN: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            16: {"r": 0, "g": 0, "b": 20, "w": 0, "dimming": 20},
+            24: {"r": 0, "g": 60, "b": 255, "w": 0, "dimming": 60},
+            59: {"r": 255, "g": 255, "b": 255, "w": 50, "dimming": 100},
+            60: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            _END: {"state": False, "r": 0, "g": 0,
+                   "b": 0, "w": 0, "dimming": 10}
+        },
+        PROGRAM_DOZE: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0, "w": 0, "dimming": 0},
+            1: {"r": 255, "g": 47, "b": 0, "dimming": 40},
+            58: {"r": 255, "g": 47, "b": 0, "dimming": 10},
+            59: {"r": 0, "g": 0, "b": 0, "dimming": 10},
+            _END: {"state": False, "r": 0, "g": 0, "b": 0, "dimming": 10}
+        },
+        PROGRAM_AMBIENT: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0, "w": 0, "dimming": 0},
+            1: {"r": 255, "g": 47, "b": 0, "dimming": 40},
+            59: {"r": 255, "g": 47, "b": 0, "dimming": 40},
+            _END: {"state": False, "r": 0, "g": 0, "b": 0, "dimming": 10}
+        },
+        PROGRAM_RGB: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0},
+            60: {"r": 255, "g": 0, "b": 0},
+            120: {"r": 255, "g": 255, "b": 0},
+            180: {"r": 0, "g": 255, "b": 0},
+            240: {"r": 0, "g": 255, "b": 255},
+            300: {"r": 0, "g": 0, "b": 255},
+            360: {"r": 0, "g": 0, "b": 0},
+            _END: {"state": False}
+        },
+        PROGRAM_GBR: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0},
+            60: {"r": 0, "g": 255, "b": 0},
+            120: {"r": 0, "g": 255, "b": 255},
+            180: {"r": 0, "g": 0, "b": 255},
+            240: {"r": 255, "g": 0, "b": 255},
+            300: {"r": 255, "g": 0, "b": 0},
+            360: {"r": 0, "g": 0, "b": 0},
+            _END: {"state": False}
+        },
+        PROGRAM_BRG: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0},
+            60: {"r": 0, "g": 0, "b": 255},
+            120: {"r": 255, "g": 0, "b": 255},
+            180: {"r": 255, "g": 0, "b": 0},
+            240: {"r": 255, "g": 255, "b": 0},
+            300: {"r": 0, "g": 255, "b": 0},
+            360: {"r": 0, "g": 0, "b": 0},
+            _END: {"state": False}
+        },
+        PROGRAM_BGR: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0},
+            60: {"r": 0, "g": 0, "b": 255},
+            120: {"r": 0, "g": 255, "b": 255},
+            180: {"r": 0, "g": 255, "b": 0},
+            240: {"r": 255, "g": 255, "b": 0},
+            300: {"r": 255, "g": 0, "b": 0},
+            360: {"r": 0, "g": 0, "b": 0},
+            _END: {"state": False}
+        },
+        PROGRAM_RBG: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0},
+            60: {"r": 255, "g": 0, "b": 0},
+            120: {"r": 255, "g": 0, "b": 255},
+            180: {"r": 0, "g": 0, "b": 255},
+            240: {"r": 0, "g": 255, "b": 255},
+            300: {"r": 0, "g": 255, "b": 0},
+            360: {"r": 0, "g": 0, "b": 0},
+            _END: {"state": False}
+        },
+        PROGRAM_GRB: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0},
+            60: {"r": 0, "g": 255, "b": 0},
+            120: {"r": 255, "g": 255, "b": 0},
+            180: {"r": 255, "g": 0, "b": 0},
+            240: {"r": 255, "g": 0, "b": 255},
+            300: {"r": 0, "g": 0, "b": 255},
+            360: {"r": 0, "g": 0, "b": 0},
+            _END: {"state": False}
+        },
+        PROGRAM_RANDOM: {
+        },
+        PROGRAM_INFINITE: {
+            _BEGIN: {"r": 0, "g": 0, "b": 255},
+            60: {"r": 0, "g": 255, "b": 255},
+            120: {"r": 0, "g": 255, "b": 0},
+            180: {"r": 255, "g": 255, "b": 0},
+            240: {"r": 255, "g": 0, "b": 0},
+            300: {"r": 255, "g": 0, "b": 255},
+            360: {"r": 0, "g": 0, "b": 255},
+            _END: {"state": False}
+        },
+        PROGRAM_WARM_TO_COLD: {
+            _BEGIN: {"state": True, "temp": 2200},
+            _END: {"state": False, "temp": 6500}
+        },
+        PROGRAM_COLD_TO_WARM: {
+            _BEGIN: {"state": True, "temp": 6500},
+            _END: {"state": False, "temp": 2200}
+        },
+        PROGRAM_SUNRISE: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            16: {"r": 0, "g": 0, "b": 20, "w": 0, "dimming": 20},
+            24: {"r": 0, "g": 60, "b": 255, "w": 0, "dimming": 60},
+            59: {"r": 255, "g": 255, "b": 255, "w": 50, "dimming": 100},
+            _END: {"state": False, "r": 0, "g": 0,
+                   "b": 0, "w": 0, "dimming": 10}
+        },
+        PROGRAM_SUNSET: {
+            _BEGIN: {"state": True, "r": 255, "g": 255, "b": 255, "w": 50, "dimming": 100},
+            16: {"r": 0, "g": 60, "b": 255, "w": 0, "dimming": 60},
+            24: {"r": 0, "g": 0, "b": 20, "w": 0, "dimming": 20},
+            59: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            _END: {"state": False, "r": 0, "g": 0,
+                   "b": 0, "w": 0, "dimming": 10}
+        },
+        PROGRAM_SUNRISE_SUNSET: {
+            _BEGIN: {"state": True, "r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            16: {"r": 0, "g": 0, "b": 20, "w": 0, "dimming": 20},
+            24: {"r": 0, "g": 60, "b": 255, "w": 0, "dimming": 60},
+            59: {"r": 255, "g": 255, "b": 255, "w": 50, "dimming": 100},
+            75: {"r": 0, "g": 60, "b": 255, "w": 0, "dimming": 60},
+            90: {"r": 0, "g": 0, "b": 20, "w": 0, "dimming": 20},
+            119: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            _END: {"state": False, "r": 0, "g": 0,
+                   "b": 0, "w": 0, "dimming": 10}
+        }
+    }
+
+    def __init__(self, wizController: WizDeviceController, programID: str, duration: int, dimming: int | None = None) -> None:
+
+        if programID not in Program.PROGRAMS:
+            raise ValueError(f"Invalid program ID: {programID}")
+
+        elif programID == Program.PROGRAM_RANDOM:
+            programID = random.choice([
+                Program.PROGRAM_RGB,
+                Program.PROGRAM_GBR,
+                Program.PROGRAM_BRG,
+                Program.PROGRAM_RBG,
+                Program.PROGRAM_GRB,
+                Program.PROGRAM_BGR
+            ])
+
+        if duration <= 0:
+            raise WizDeviceException(
+                "Program duration must be greater than 0 seconds")
+
+        self.programID: int = programID
+        self.dimming: int | None = dimming
+        self.start_time: float = 0
+        self.duration: int = duration
+
+        self._current_program: dict = Program.PROGRAMS.get(
+            programID, {}).copy()
+        max_time: int = max(max(self._current_program.keys()), 1)
+        self._time_factor: float = max_time / duration
+
+        self.wizController: WizDeviceController = wizController
+        self._last_pilot: Pilot = None
+
+    def reset(self) -> None:
+
+        self._time = Program._BEGINelapsed
+
+    def get_pilot(self, time_: int) -> Pilot:
+
+        current_step, next_step = self._get_step(time_)
+        if time_ <= 0 or time_ >= self.duration:
+            return Pilot.from_json(self._current_program[current_step]) if current_step is not None else None
+
+        pilot = self.interpolate(time_, current_step, next_step)
+
+        return pilot
+
+    def interpolate(self, time_: int, current_step: int, next_step: int) -> Pilot:
+
+        duration_of_step = max(next_step, current_step + 1) - current_step
+        progress_in_step = time_ - current_step / self._time_factor
+
+        interpolable_keys = ["r", "g", "b", "w", "dimming", "temp"]
+        interpolated_values = {}
+
+        for key in interpolable_keys:
+            if key not in self._current_program[current_step] or key not in self._current_program[next_step]:
+                continue
+            elif key in self._current_program[current_step] and key not in self._current_program[next_step]:
+                interpolated_values[key] = self._current_program[current_step][key]
+                continue
+
+            start_value = self._current_program[current_step].get(key, 0)
+            end_value = self._current_program[next_step].get(
+                key, 0) if next_step is not None else start_value
+            interpolated_value = int(start_value + (end_value - start_value) * (
+                progress_in_step / duration_of_step) * self._time_factor)
+
+            if key == "dimming":
+                interpolated_value = int((interpolated_value + 5) // 10 * 10)
+            elif key == "temp":
+                interpolated_value = int(
+                    (interpolated_value + 50) // 100 * 100)
+
+            interpolated_values[key] = interpolated_value
+
+        for key in self._current_program[current_step]:
+            if key not in interpolable_keys:
+                interpolated_values[key] = self._current_program[current_step][key]
+
+        for key in ["state", "sceneId", "speed"]:
+            if key not in interpolated_values:
+                steps = [s for s in self._current_program.keys(
+                ) if s != Program._END and s <= current_step]
+                for step in reversed(steps):
+                    if key in self._current_program[step]:
+                        interpolated_values[key] = self._current_program[step][key]
+                        break
+
+        if self.dimming is not None and "dimming" not in interpolated_values:
+            interpolated_values["dimming"] = self.dimming
+
+        return Pilot.from_json(interpolated_values)
+
+    def _get_step(self, time_: int) -> tuple[int, int]:
+
+        steps = list(self._current_program.keys())
+        if time_ >= self.duration:
+            return steps[-1], None
+
+        factorized_time = self._time_factor * time_
+        if steps[-1] == Program._END:
+            steps = steps[:-1]
+
+        current_index = None
+        current_step = None
+
+        for i, step_time in enumerate(steps):
+            if factorized_time >= step_time:
+                current_index = i
+                current_step = step_time
+            else:
+                break
+
+        next_step = steps[current_index + 1] if current_index + \
+            1 < len(steps) else Program._END
+        return current_step, next_step
+
+    def performPilot(self, elapsed: int) -> None:
+
+        pilot = self.get_pilot(elapsed)
+        if pilot is not None and not pilot.equals(self._last_pilot):
+            LOGGER.debug(
+                f"Sending pilot for program duration {self.duration} sec at elapsed {elapsed} sec")
+            self.wizController.resetCommands()
+            self.wizController.setPilot(pilot.to_payload()).perform()
+
+        self._last_pilot = pilot
+
+    def initialize(self, offset: int = 0) -> 'Program':
+
+        if self.programID in Program.PROGRAMS_STARTING_FROM_CURRENT:
+            self.wizController.resetCommands()
+            self.wizController.getPilot().perform()
+
+            if not self.wizController.devices or not self.wizController.devices[0].pilot:
+                raise WizDeviceException(
+                    f"Unable to get current pilot for program '{self.programID}'"
+                )
+
+            current_pilot = self.wizController.devices[0].pilot.to_dict()
+            for k in ["r", "g", "b", "w", "c", "dimming"]:
+                if k in current_pilot and k in self._current_program[Program._BEGIN]:
+                    self._current_program[Program._BEGIN][k] = current_pilot[k]
+
+        self._last_pilot: Pilot | None = None
+        self.start_time = int(time.time()) - offset
+
+        return self
+
+    def start(self, interval: int = 1) -> None:
+        """Run a program by polling its pilot at the configured interval and sending new pilots when they change."""
+
+        def _format_time(secs: int) -> str:
+
+            return f"{(secs // 3600):02}:{(secs // 60 % 60):02}:{(secs % 60):02}"
+
+        if interval <= 0:
+            raise WizDeviceException(
+                "Program update interval must be greater than 0 seconds")
+
+        elapsed = 0
+        interrupted = False
+        interrupted_exception: BaseException | None = None
+
+        def _signal_handler(signum, frame):
+            nonlocal interrupted
+            interrupted = True
+
+        original_sigint = None
+        original_sigterm = None
+        try:
+            original_sigint = signal.getsignal(signal.SIGINT)
+            original_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGINT, _signal_handler)
+            signal.signal(signal.SIGTERM, _signal_handler)
+        except Exception:
+            original_sigint = None
+            original_sigterm = None
+
+        try:
+            while True:
+
+                elapsed = int(time.time() - self.start_time)
+                if self.programID == Program.PROGRAM_INFINITE:
+                    elapsed = elapsed % self.duration
+                    LOGGER.info(
+                        f"Elapsed: {_format_time(elapsed)}, ETA: {_format_time(self.duration - elapsed)}, {int(elapsed / self.duration * 360)}°")
+                else:
+                    LOGGER.info(
+                        f"Elapsed: {_format_time(elapsed)}, ETA: {_format_time(self.duration - elapsed)}, {int(100 * elapsed / self.duration)}%")
+
+                before_perform = time.time()
+                self.performPilot(elapsed)
+
+                if elapsed >= self.duration:
+                    break
+
+                try:
+                    time.sleep(
+                        max(interval - (time.time() - before_perform), 0))
+
+                except BaseException as ex:
+                    if interrupted or isinstance(ex, KeyboardInterrupt):
+                        interrupted = True
+                        interrupted_exception = ex
+                        break
+                    raise
+
+                if interrupted:
+                    break
+
+        finally:
+            if interrupted:
+                LOGGER.info(
+                    f"Program interrupted after {elapsed} seconds; sending final program step")
+                self.performPilot(self.duration)
+
+            try:
+                if original_sigint is not None:
+                    signal.signal(signal.SIGINT, original_sigint)
+                if original_sigterm is not None:
+                    signal.signal(signal.SIGTERM, original_sigterm)
+            except Exception:
+                pass
+
+        if interrupted and interrupted_exception is not None:
+            raise interrupted_exception
+
+    @staticmethod
+    def from_json(json_: dict) -> 'Program':
+
+        program = Program(wizController=WizDeviceController(ip_addresses=json_.get("ip_addresses", [])),
+                          programID=json_.get("programID", None),
+                          dimming=json_.get("dimming", 100),
+                          duration=json_.get("duration", 0))
+
+        program.start_time = json_.get("start_time", 0)
+
+        return program
+
+    def to_dict(self) -> dict:
+
+        return {
+            "programID": self.programID,
+            "dimming": self.dimming,
+            "start_time": self.start_time,
+            "duration": self.duration,
+            "ip_addresses": self.wizController.ip_addresses
+        }
+
+    def __str__(self):
+        return f"Program(controller={self.wizController}, programId={self.programID}, duration={self.duration}, dimming={self.dimming}, start_time={self.start_time})"
+
 
 class WizDeviceCLI():
     """Command-line interface for interacting with Wiz devices. Parses command-line arguments, executes commands, and provides help information."""
@@ -1263,6 +1641,31 @@ class WizDeviceCLI():
     _COMMAND = "command"
     _ARGS = "args"
     _PARAMS = "params"
+
+    @staticmethod
+    def parse_program_duration(arg: str) -> int:
+        """Parse program duration as minutes, accepting integer minutes or HH:MM like 24:00."""
+
+        minutes = None
+        if re.fullmatch(r"[1-9][0-9]{0,3}", arg):
+            minutes = int(arg)
+        else:
+            time_match = re.fullmatch(
+                r"(?:([01]?\d|2[0-3]):([0-5]\d)|24:00)", arg)
+            if time_match:
+                if arg == "24:00":
+                    minutes = 1440
+                else:
+                    hours = int(time_match.group(1))
+                    mins = int(time_match.group(2))
+                    minutes = hours * 60 + mins
+
+        if minutes is None or minutes < 1 or minutes > 1440:
+            raise ValueError(
+                "Program duration must be between 1 and 1440 minutes, or in HH:MM format up to 24:00"
+            )
+
+        return minutes * 60
 
     COMMANDS: dict[str, dict[str, object]] = {
         "aliases": {
@@ -1334,7 +1737,7 @@ class WizDeviceCLI():
         "scene": {
             _USAGE: "--scene <id/name>",
             _DESCR: "set scene by name or id\n- %s" % "\n- ".join(Pilot.scene_list()),
-            _REGEX: r"^(%s|%s|%s|%s)$" % (str(Pilot.SCENE_DIM_TO_WARM), str(Pilot.SCENE_RHYTHM), "|".join([str(i) for i in range(len(Pilot.SCENES_LIST) - 2)]), "|".join(Pilot.SCENES_LIST)),
+            _REGEX: r"^(%s)$" % ("|".join([Pilot.SCENES.get(sceneId).get("name") for i, sceneId in enumerate(Pilot.SCENES) if i < len(Pilot.SCENES) - 2])),
             _TYPES: [str],
             _ACTION: lambda controller, params: controller.withScene(scene=params[0]),
         },
@@ -1351,6 +1754,13 @@ class WizDeviceCLI():
             _REGEX: r"^([1-9][0-9]|1[0-9][0-9]|200)$",
             _TYPES: [int],
             _ACTION: lambda controller, params: controller.withSpeed(speed=params[0]),
+        },
+        "program": {
+            _USAGE: "--program <name> <duration> [<dimming>]",
+            _DESCR: "run a built-in program for a duration in minutes or HH:MM (24:00 supported)\n- supported names: %s" % ", ".join(sorted(Program.PROGRAMS.keys())),
+            _REGEX: r"^(%s) ((?:[1-9][0-9]{0,3})|(?:[01]?\d:[0-5]\d)|(?:2[0-3]:[0-5]\d)|24:00)(?: ((?:[1-9][0-9]|100)))?$" % "|".join([re.escape(name) for name in Program.PROGRAMS]),
+            _TYPES: [str, parse_program_duration, int],
+            _ACTION: lambda controller, params: Program(controller, params[0], duration=params[1], dimming=params[2] if len(params) > 2 else None).initialize().start(),
         },
         "register": {
             _USAGE: "--register",
@@ -1571,7 +1981,11 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         help += self._build_help(command="scene")
         help += self._build_help(command="speed")
 
+        help += "\n\nSet program:"
+        help += self._build_help(command="program")
+
         help += "\n\nOther commands:"
+        help += self._build_help(command="pulse")
         help += self._build_help(command="register")
         help += self._build_help(command="unregister")
         help += self._build_help(command="listen")

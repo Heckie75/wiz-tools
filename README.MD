@@ -1,16 +1,18 @@
-# wiz-tool
+# wiz-tools
 
-A simple Python CLI tool for controlling and querying Wiz lighting devices over the local network.
+A Python CLI tool for controlling and querying Wiz lighting devices over the local network.
 
 ## Features
 
 - Scan the local network for Wiz devices
-- Read the current state of devices
+- Read device state, power usage, and full device configuration
 - Turn devices on/off
-- Set color temperature, dimming, and RGB color
-- Activate predefined scenes and adjust scene speed
-- Print raw device data and JSON output
+- Set color temperature, dimming, RGB color, and scenes
+- Adjust scene speed
+- run light programs
+- Print raw device data or structured JSON output
 - Support alias-based device identification via `~/.known_wizs`
+- Target devices by home, room, or group when sending broadcast-style commands
 
 ## Requirements
 
@@ -19,10 +21,10 @@ A simple Python CLI tool for controlling and querying Wiz lighting devices over 
 
 ## Installation
 
-No installation required. Run the `wiz.py` script directly.
+No installation is required. Run the script directly:
 
 ```bash
-python wiz.py --help
+python3 wiz.py --help
 ```
 
 ## Usage
@@ -31,36 +33,30 @@ python wiz.py --help
 ./wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command> [<param> ...]
 ```
 
-## Multiple devices
-
-Multiple devices can be controlled in a single request by listing more than one IP address or alias before the command list.
-
-```bash
-./wiz.py 192.168.178.33 192.168.178.34 --on --dimming 80
-```
-
-## Combining commands
-
-Multiple commands can be combined in a single call. The tool will execute them in the order provided.
+Commands can be combined in a single invocation. The tool executes them in the order they are provided.
 
 ```bash
 ./wiz.py 192.168.178.33 --on --temp 3000 --dimming 80 --scene Romance
 ```
 
-### Example commands
+## Multiple devices
+
+Multiple devices can be controlled at once by listing more than one IP address or alias before the command list.
+
+```bash
+./wiz.py 192.168.178.33 192.168.178.34 --on --dimming 80
+```
+
+## Example commands
 
 - Query device status:
   ```bash
   ./wiz.py 192.168.178.33 --status
   ```
 
-- Turn the device on:
+- Turn the device on/off:
   ```bash
   ./wiz.py 192.168.178.33 --on
-  ```
-
-- Turn the device off:
-  ```bash
   ./wiz.py 192.168.178.33 --off
   ```
 
@@ -88,6 +84,14 @@ Multiple commands can be combined in a single call. The tool will execute them i
   ```bash
   ./wiz.py 192.168.178.33 --speed 100
   ```
+
+- Run a program:
+  ```bash
+  ./wiz.py 192.168.178.33 --program doze 2
+  ./wiz.py 192.168.178.33 --program sunrise 10 80
+  ```
+
+  Program durations can be specified as minutes or as `HH:MM` (up to `24:00`). The optional third argument sets a dimming override.
 
 - Print full device state:
   ```bash
@@ -139,7 +143,8 @@ This would match both `living-room` and `bedroom` if those aliases exist in `~/.
 
 - Use `--log DEBUG` to enable detailed debug output.
 - Alias support uses a local file at `~/.known_wizs`.
+- programs include `interval`, `fade`, `wakeup`, `doze`, `ambient`, `rgb`, `gbr`, `brg`, `bgr`, `rbg`, `grb`, `random`, `infinite`, `warm-to-cold`, `cold-to-warm`, `sunrise`, `sunset`, and `sunrise-sunset`.
 
 ## License
 
-No license information is included in this project.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for the full text.
