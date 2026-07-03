@@ -33,7 +33,25 @@ python3 wiz.py --help
 ./wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command> [<param> ...]
 ```
 
-Commands can be combined in a single invocation. The tool executes them in the order they are provided.
+## Multiple devices
+
+Multiple devices can be controlled in a single request by listing more than one IP address or alias before the command list.
+
+```bash
+./wiz.py 192.168.178.33 192.168.178.34 --on --dimming 80
+```
+
+When running a program across several devices, you can add a phase shift to create a time delay between them. The value is interpreted as the number of seconds between successive devices.
+
+```bash
+./wiz.py 192.168.178.33 192.168.178.34 192.168.178.35 --program infinite 10 80 30
+```
+
+In that example, the second device starts 30 seconds ahead and so on.
+
+## Combining commands
+
+Multiple commands can be combined in a single call. The tool will execute them in the order provided.
 
 ```bash
 ./wiz.py 192.168.178.33 --on --temp 3000 --dimming 80 --scene Romance

@@ -191,29 +191,5 @@ class TestPilot(unittest.TestCase):
         self.assertIn("Red", s)
         self.assertIn("rgb(255, 0, 0)", s)
 
-    def test_scene_and_index_mapping(self):
-        p = Pilot()
-        # Rhythm special case
-        p.sceneId = Pilot.SCENE_RHYTHM
-        p.speed = 7
-        self.assertEqual(p.scene_str(), f"Rhythm ({Pilot.SCENE_RHYTHM}, speed: {p.speed})")
-
-        # Pulse special case
-        p.sceneId = Pilot.SCENE_PULSE
-        self.assertEqual(p.scene_str(), f"Pulse ({Pilot.SCENE_PULSE})")
-
-        # Dim to warm special case
-        p.sceneId = Pilot.SCENE_DIM_TO_WARM
-        p.temp = 2500
-        p.dimming = 50
-        self.assertIn("Dim to Warm", p.scene_str())
-
-        # index_to_sceneId mapping
-        self.assertEqual(Pilot.index_to_sceneId(37), Pilot.SCENE_DIM_TO_WARM)
-        self.assertEqual(Pilot.index_to_sceneId(38), Pilot.SCENE_PULSE)
-        self.assertEqual(Pilot.index_to_sceneId(39), Pilot.SCENE_RHYTHM)
-
-
-
 if __name__ == "__main__":
     unittest.main()

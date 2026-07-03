@@ -1375,7 +1375,7 @@ class Program():
         }
     }
 
-    def __init__(self, wizController: WizDeviceController, programID: str, duration: int, dimming: int | None = None) -> None:
+    def __init__(self, wizController: WizDeviceController, programID: str, duration: int, dimming: int | None = None, phase_shift: int = 0) -> None:
 
         if programID not in Program.PROGRAMS:
             raise ValueError(f"Invalid program ID: {programID}")
@@ -1396,6 +1396,7 @@ class Program():
 
         self.programID: int = programID
         self.dimming: int | None = dimming
+        self.phase_shift: int = phase_shift
         self.start_time: float = 0
         self.duration: int = duration
 
@@ -1405,19 +1406,23 @@ class Program():
         self._time_factor: float = max_time / duration
 
         self.wizController: WizDeviceController = wizController
-        self._last_pilot: Pilot = None
+        self._last_pilots: dict[int, Pilot] = {}
 
     def reset(self) -> None:
 
         self._time = Program._BEGINelapsed
 
-    def get_pilot(self, time_: int) -> Pilot:
+    def get_pilot(self, time_: int, device_index: int = 0) -> Pilot:
 
-        current_step, next_step = self._get_step(time_)
-        if time_ <= 0 or time_ >= self.duration:
+        effective_time = int(time_)
+        if self.programID == Program.PROGRAM_INFINITE and self.duration > 0:
+            effective_time = (effective_time + (self.phase_shift * device_index)) % self.duration
+
+        current_step, next_step = self._get_step(effective_time)
+        if effective_time <= 0 or effective_time >= self.duration:
             return Pilot.from_json(self._current_program[current_step]) if current_step is not None else None
 
-        pilot = self.interpolate(time_, current_step, next_step)
+        pilot = self.interpolate(effective_time, current_step, next_step)
 
         return pilot
 
@@ -1494,14 +1499,44 @@ class Program():
 
     def performPilot(self, elapsed: int) -> None:
 
-        pilot = self.get_pilot(elapsed)
-        if pilot is not None and not pilot.equals(self._last_pilot):
-            LOGGER.debug(
-                f"Sending pilot for program duration {self.duration} sec at elapsed {elapsed} sec")
-            self.wizController.resetCommands()
-            self.wizController.setPilot(pilot.to_payload()).perform()
+        if not self.wizController.ip_addresses:
+            return
 
-        self._last_pilot = pilot
+        if self.phase_shift > 0 and len(self.wizController.ip_addresses) > 1:
+            LOGGER.debug(
+                f"Performing program '{self.programID}' with phase shift {self.phase_shift} sec for {len(self.wizController.ip_addresses)} devices")
+
+            for device_index, ip_address in enumerate(self.wizController.ip_addresses):
+                pilot = self.get_pilot(elapsed, device_index=device_index)
+                if pilot is None:
+                    continue
+
+                last_pilot = self._last_pilots.get(device_index)
+                if not pilot.equals(last_pilot):
+                    LOGGER.debug(
+                        f"Sending pilot for program duration {self.duration} sec at elapsed {elapsed} sec to {ip_address} (phase offset {self.phase_shift * device_index})")
+                    original_ip_addresses = list(self.wizController.ip_addresses)
+                    try:
+                        self.wizController.ip_addresses = [ip_address]
+                        self.wizController.resetCommands()
+                        self.wizController.setPilot(pilot.to_payload()).perform()
+                    finally:
+                        self.wizController.ip_addresses = original_ip_addresses
+
+                self._last_pilots[device_index] = pilot
+                
+        else:
+            pilot = self.get_pilot(elapsed)
+            if pilot is None:
+                return
+
+            if not pilot.equals(self._last_pilots.get(0)):
+                LOGGER.debug(
+                    f"Sending pilot for program duration {self.duration} sec at elapsed {elapsed} sec to {len(self.wizController.ip_addresses)} devices")
+                self.wizController.resetCommands()
+                self.wizController.setPilot(pilot.to_payload()).perform()
+
+            self._last_pilots[0] = pilot
 
     def initialize(self, offset: int = 0) -> 'Program':
 
@@ -1590,7 +1625,12 @@ class Program():
             if interrupted:
                 LOGGER.info(
                     f"Program interrupted after {elapsed} seconds; sending final program step")
-                self.performPilot(self.duration)
+                self.end()
+            
+            elif self.phase_shift > 0 and len(self.wizController.ip_addresses) > 1:
+                LOGGER.info(
+                    f"Program with phase shift completed after {elapsed} seconds; sending final program step")
+                self.end()
 
             try:
                 if original_sigint is not None:
@@ -1603,13 +1643,20 @@ class Program():
         if interrupted and interrupted_exception is not None:
             raise interrupted_exception
 
+    def end(self) -> None:
+
+        pilot = Pilot.from_json(self._current_program[-1])
+        self.wizController.resetCommands()
+        self.wizController.setPilot(pilot.to_payload()).perform()
+
     @staticmethod
     def from_json(json_: dict) -> 'Program':
 
         program = Program(wizController=WizDeviceController(ip_addresses=json_.get("ip_addresses", [])),
                           programID=json_.get("programID", None),
                           dimming=json_.get("dimming", 100),
-                          duration=json_.get("duration", 0))
+                          duration=json_.get("duration", 0),
+                          phase_shift=json_.get("phase_shift", 0))
 
         program.start_time = json_.get("start_time", 0)
 
@@ -1620,13 +1667,14 @@ class Program():
         return {
             "programID": self.programID,
             "dimming": self.dimming,
+            "phase_shift": self.phase_shift,
             "start_time": self.start_time,
             "duration": self.duration,
             "ip_addresses": self.wizController.ip_addresses
         }
 
     def __str__(self):
-        return f"Program(controller={self.wizController}, programId={self.programID}, duration={self.duration}, dimming={self.dimming}, start_time={self.start_time})"
+        return f"Program(controller={self.wizController}, programId={self.programID}, duration={self.duration}, dimming={self.dimming}, phase_shift={self.phase_shift}, start_time={self.start_time})"
 
 
 class WizDeviceCLI():
@@ -1756,11 +1804,11 @@ class WizDeviceCLI():
             _ACTION: lambda controller, params: controller.withSpeed(speed=params[0]),
         },
         "program": {
-            _USAGE: "--program <name> <duration> [<dimming>]",
-            _DESCR: "run a built-in program for a duration in minutes or HH:MM (24:00 supported)\n- supported names: %s" % ", ".join(sorted(Program.PROGRAMS.keys())),
-            _REGEX: r"^(%s) ((?:[1-9][0-9]{0,3})|(?:[01]?\d:[0-5]\d)|(?:2[0-3]:[0-5]\d)|24:00)(?: ((?:[1-9][0-9]|100)))?$" % "|".join([re.escape(name) for name in Program.PROGRAMS]),
-            _TYPES: [str, parse_program_duration, int],
-            _ACTION: lambda controller, params: Program(controller, params[0], duration=params[1], dimming=params[2] if len(params) > 2 else None).initialize().start(),
+            _USAGE: "--program <name> <duration> [<dimming>] [<phase_shift>]",
+            _DESCR: "run a built-in program for a duration in minutes or HH:MM (24:00 supported)\n- supported names: %s\n- phase shift: optional seconds between multiple devices, e.g. 30 means each next device starts 30 seconds ahead" % ", ".join(sorted(Program.PROGRAMS.keys())),
+            _REGEX: r"^(%s) ((?:[1-9][0-9]{0,3})|(?:[01]?\d:[0-5]\d)|(?:2[0-3]:[0-5]\d)|24:00)(?: ((?:[1-9][0-9]|100)))?(?: (-?\d+))?$" % "|".join([re.escape(name) for name in Program.PROGRAMS]),
+            _TYPES: [str, parse_program_duration, int, int],
+            _ACTION: lambda controller, params: Program(controller, params[0], duration=params[1], dimming=params[2] if len(params) > 2 else None, phase_shift=params[3] if len(params) > 3 else 0).initialize().start(),
         },
         "register": {
             _USAGE: "--register",

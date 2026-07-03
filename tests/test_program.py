@@ -77,12 +77,17 @@ class TestProgram(unittest.TestCase):
         self.assertEqual(p.b, 255)
         self.assertEqual(p.dimming, 100)
 
-        p = program.get_pilot(60)
-        self.assertEqual(p.state, False)
-        self.assertEqual(p.r, 0)
-        self.assertEqual(p.g, 0)
-        self.assertEqual(p.b, 0)
-        self.assertEqual(p.dimming, 10)
+    def test_get_pilot_infinite_applies_phase_shift_per_device(self):
+
+        controller = FakeController(ip_addresses=["192.168.1.100", "192.168.1.101"])
+        program = Program(controller, Program.PROGRAM_INFINITE, 360, phase_shift=60)
+
+        first = program.get_pilot(0, device_index=0)
+        second = program.get_pilot(0, device_index=1)
+        reference = program.get_pilot(60, device_index=0)
+
+        self.assertEqual(first.b, 255)
+        self.assertEqual(second.to_dict(), reference.to_dict())
 
     def test_run_program_sends_new_pilot_only_when_changed(self):
 
