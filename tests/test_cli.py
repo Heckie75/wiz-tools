@@ -63,6 +63,24 @@ class TestWizDeviceCLI(unittest.TestCase):
         self.assertEqual(commands[0]["args"], ["infinite", "10", "80", "30"])
         self.assertEqual(commands[0]["params"], ["infinite", 600, 80, 30])
 
+    def test_parse_program_command_with_automatic_phase_shift(self):
+        cli = WizDeviceCLI.__new__(WizDeviceCLI)
+        cli.alias = Alias()
+
+        addresses, commands = cli.parse_args([
+            "wiz.py",
+            "192.168.1.100",
+            "192.168.1.101",
+            "--program",
+            "infinite",
+            "10",
+            "80",
+            "auto",
+        ])
+
+        self.assertEqual(addresses, {"wiz.py", "192.168.1.100", "192.168.1.101"})
+        self.assertEqual(commands[0]["params"], ["infinite", 600, 80, "auto"])
+
     def test_run_program_by_name_with_current_pilot(self):
         controller = WizDeviceController(["192.168.1.100"])
         controller.getPilot = MagicMock(return_value=controller)

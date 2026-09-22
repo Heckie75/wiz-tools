@@ -89,6 +89,20 @@ class TestProgram(unittest.TestCase):
         self.assertEqual(first.b, 255)
         self.assertEqual(second.to_dict(), reference.to_dict())
 
+    def test_auto_phase_shift_distributes_program_runtime(self):
+        controller = FakeController(ip_addresses=[
+            "192.168.1.100", "192.168.1.101", "192.168.1.102"])
+        program = Program(controller, Program.PROGRAM_INFINITE, 100, phase_shift="auto")
+
+        self.assertEqual(program.phase_shift, 33)
+
+        first = program.get_pilot(0, device_index=0)
+        second = program.get_pilot(0, device_index=1)
+        reference = program.get_pilot(33, device_index=0)
+
+        self.assertEqual(second.to_dict(), reference.to_dict())
+        self.assertEqual(first.b, 255)
+
     def test_run_program_sends_new_pilot_only_when_changed(self):
 
         class FakeController(WizDeviceController):

@@ -1204,6 +1204,25 @@ class WizDeviceController():
 
         self.resetCommands()
 
+    def runProgram(self, program: 'Program', interval: int = 1) -> 'WizDeviceController':
+        """Run a program and return this controller for compatibility with the fluent API."""
+
+        program.initialize().start(interval=interval)
+        return self
+
+    def runProgramByName(self, programID: str, duration: int, dimming: int | None = None,
+                         phase_shift: int | str = 0, interval: int = 1) -> 'WizDeviceController':
+        """Create and run a named program using this controller."""
+
+        program = Program(
+            wizController=self,
+            programID=programID,
+            duration=duration,
+            dimming=dimming,
+            phase_shift=phase_shift,
+        )
+        return self.runProgram(program, interval=interval)
+
     def __str__(self):
         return f"WizDeviceController(ip_addresses={self.ip_addresses}, commands={self.commands}, devices={self.devices})"
 
@@ -1375,7 +1394,7 @@ class Program():
         }
     }
 
-    def __init__(self, wizController: WizDeviceController, programID: str, duration: int, dimming: int | None = None, phase_shift: int = 0) -> None:
+    def __init__(self, wizController: WizDeviceController, programID: str, duration: int, dimming: int | None = None, phase_shift: int | str = 0, currentPilot: Pilot | None = None) -> None:
 
         if programID not in Program.PROGRAMS:
             raise ValueError(f"Invalid program ID: {programID}")
@@ -1396,6 +1415,12 @@ class Program():
 
         self.programID: int = programID
         self.dimming: int | None = dimming
+        if isinstance(phase_shift, str) and phase_shift.lower() == "auto":
+            device_count = len(wizController.ip_addresses)
+            phase_shift = duration // device_count if device_count > 1 else 0
+        elif isinstance(phase_shift, str):
+            phase_shift = int(phase_shift)
+
         self.phase_shift: int = phase_shift
         self.start_time: float = 0
         self.duration: int = duration
@@ -1407,6 +1432,7 @@ class Program():
 
         self.wizController: WizDeviceController = wizController
         self._last_pilots: dict[int, Pilot] = {}
+        self._initial_pilot = currentPilot
 
     def reset(self) -> None:
 
@@ -1541,15 +1567,18 @@ class Program():
     def initialize(self, offset: int = 0) -> 'Program':
 
         if self.programID in Program.PROGRAMS_STARTING_FROM_CURRENT:
-            self.wizController.resetCommands()
-            self.wizController.getPilot().perform()
+            if self._initial_pilot:
+                current_pilot = self._initial_pilot.to_dict()
+            else:
+                self.wizController.resetCommands()
+                self.wizController.getPilot().perform()
 
-            if not self.wizController.devices or not self.wizController.devices[0].pilot:
-                raise WizDeviceException(
-                    f"Unable to get current pilot for program '{self.programID}'"
-                )
+                if not self.wizController.devices or not self.wizController.devices[0].pilot:
+                    raise WizDeviceException(
+                        f"Unable to get current pilot for program '{self.programID}'"
+                    )
 
-            current_pilot = self.wizController.devices[0].pilot.to_dict()
+                current_pilot = self.wizController.devices[0].pilot.to_dict()
             for k in ["r", "g", "b", "w", "c", "dimming"]:
                 if k in current_pilot and k in self._current_program[Program._BEGIN]:
                     self._current_program[Program._BEGIN][k] = current_pilot[k]
@@ -1715,6 +1744,12 @@ class WizDeviceCLI():
 
         return minutes * 60
 
+    @staticmethod
+    def parse_program_phase_shift(arg: str) -> int | str:
+        """Parse a phase shift in seconds or calculate it automatically."""
+
+        return "auto" if arg.lower() == "auto" else int(arg)
+
     COMMANDS: dict[str, dict[str, object]] = {
         "aliases": {
             _USAGE: "--aliases",
@@ -1805,9 +1840,9 @@ class WizDeviceCLI():
         },
         "program": {
             _USAGE: "--program <name> <duration> [<dimming>] [<phase_shift>]",
-            _DESCR: "run a built-in program for a duration in minutes or HH:MM (24:00 supported)\n- supported names: %s\n- phase shift: optional seconds between multiple devices, e.g. 30 means each next device starts 30 seconds ahead" % ", ".join(sorted(Program.PROGRAMS.keys())),
-            _REGEX: r"^(%s) ((?:[1-9][0-9]{0,3})|(?:[01]?\d:[0-5]\d)|(?:2[0-3]:[0-5]\d)|24:00)(?: ((?:[1-9][0-9]|100)))?(?: (-?\d+))?$" % "|".join([re.escape(name) for name in Program.PROGRAMS]),
-            _TYPES: [str, parse_program_duration, int, int],
+            _DESCR: "run a built-in program for a duration in minutes or HH:MM (24:00 supported)\n- supported names: %s\n- phase shift: optional seconds between multiple devices, or 'auto' to divide the runtime evenly" % ", ".join(sorted(Program.PROGRAMS.keys())),
+            _REGEX: r"^(%s) ((?:[1-9][0-9]{0,3})|(?:[01]?\d:[0-5]\d)|(?:2[0-3]:[0-5]\d)|24:00)(?: ((?:[1-9][0-9]|100)))?(?: (-?\d+|auto))?$" % "|".join([re.escape(name) for name in Program.PROGRAMS]),
+            _TYPES: [str, parse_program_duration, int, parse_program_phase_shift],
             _ACTION: lambda controller, params: Program(controller, params[0], duration=params[1], dimming=params[2] if len(params) > 2 else None, phase_shift=params[3] if len(params) > 3 else 0).initialize().start(),
         },
         "register": {

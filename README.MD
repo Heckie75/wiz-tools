@@ -41,13 +41,14 @@ Multiple devices can be controlled in a single request by listing more than one 
 ./wiz.py 192.168.178.33 192.168.178.34 --on --dimming 80
 ```
 
-When running a program across several devices, you can add a phase shift to create a time delay between them. The value is interpreted as the number of seconds between successive devices.
+When running a program across several devices, you can add a phase shift to create a time delay between them. The value is interpreted as the number of seconds between successive devices. Use `auto` to divide the program runtime evenly across the listed devices.
 
 ```bash
 ./wiz.py 192.168.178.33 192.168.178.34 192.168.178.35 --program infinite 10 80 30
+./wiz.py 192.168.178.33 192.168.178.34 192.168.178.35 --program infinite 10 80 auto
 ```
 
-In that example, the second device starts 30 seconds ahead and so on.
+In the first example, the second device starts 30 seconds ahead and so on. In the second, each device is offset by one third of the 10-minute runtime.
 
 ## Combining commands
 
@@ -162,6 +163,10 @@ This would match both `living-room` and `bedroom` if those aliases exist in `~/.
 - Use `--log DEBUG` to enable detailed debug output.
 - Alias support uses a local file at `~/.known_wizs`.
 - programs include `interval`, `fade`, `wakeup`, `doze`, `ambient`, `rgb`, `gbr`, `brg`, `bgr`, `rbg`, `grb`, `random`, `infinite`, `warm-to-cold`, `cold-to-warm`, `sunrise`, `sunset`, and `sunrise-sunset`.
+
+## Recent changes
+
+- Added `auto` phase shifting to distribute a program evenly across multiple devices.
 
 ## License
 
