@@ -16,7 +16,7 @@ A Python CLI tool for controlling and querying Wiz lighting devices over the loc
 
 ## Requirements
 
-- Python 3.11 or newer
+- Python 3.7 or newer
 - Network access to Wiz devices
 
 ## Installation

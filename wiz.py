@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -617,7 +619,7 @@ class Pilot():
         """Get the human-readable name of a scene based on its integer identifier. Handles special cases for certain scene values and falls back to a predefined list of scene names."""
 
         try:
-            return f"{Pilot.SCENES.get(self.sceneId).get("name")} ({self.sceneId}, speed: {self.speed})"
+            return f"{Pilot.SCENES.get(self.sceneId).get('name')} ({self.sceneId}, speed: {self.speed})"
 
         except IndexError:
             return "Unknown Scene"
