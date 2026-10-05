@@ -94,6 +94,15 @@ Multiple devices can be controlled at once by listing more than one IP address o
   ./wiz.py 192.168.178.33 --color 255 100 50
   ```
 
+- Set cold-white and warm-white levels:
+  ```bash
+  ./wiz.py 192.168.178.33 --white 255 0
+  ```
+  Both values range from 0 to 255. This can be combined with RGB color:
+  ```bash
+  ./wiz.py 192.168.178.33 --color 255 0 59 --white 255 0
+  ```
+
 - Set a scene:
   ```bash
   ./wiz.py 192.168.178.33 --scene Romance

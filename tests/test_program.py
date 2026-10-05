@@ -77,6 +77,19 @@ class TestProgram(unittest.TestCase):
         self.assertEqual(p.b, 255)
         self.assertEqual(p.dimming, 100)
 
+    def test_interpolate_cold_and_warm_white_channels(self):
+        program = Program(FakeController(ip_addresses=[]), Program.PROGRAM_INTERVAL, duration=1)
+        program._current_program = {
+            Program._BEGIN: {"state": True, "c": 0, "w": 255},
+            100: {"state": True, "c": 255, "w": 0},
+            Program._END: {"state": False},
+        }
+
+        pilot = program.interpolate(50, Program._BEGIN, 100)
+
+        self.assertEqual(pilot.c, 127)
+        self.assertEqual(pilot.w, 127)
+
     def test_get_pilot_infinite_applies_phase_shift_per_device(self):
 
         controller = FakeController(ip_addresses=["192.168.1.100", "192.168.1.101"])

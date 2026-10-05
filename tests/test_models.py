@@ -140,6 +140,8 @@ class TestPilot(unittest.TestCase):
             "r": 255,
             "g": 0,
             "b": 0,
+            "c": 200,
+            "w": 50,
             "dimming": 128,
             "sceneId": 0,
             "speed": 5,
@@ -153,6 +155,8 @@ class TestPilot(unittest.TestCase):
         self.assertEqual(p.r, 255)
         self.assertEqual(p.g, 0)
         self.assertEqual(p.b, 0)
+        self.assertEqual(p.c, 200)
+        self.assertEqual(p.w, 50)
         self.assertEqual(p.dimming, 128)
         self.assertEqual(p.sceneId, 0)
         self.assertEqual(p.speed, 5)
@@ -160,6 +164,8 @@ class TestPilot(unittest.TestCase):
         self.assertEqual(p.mac, "AA:BB:CC:DD:EE:FF")
         d = p.to_dict()
         self.assertEqual(d["state"], True)
+        self.assertEqual(p.to_payload()["c"], 200)
+        self.assertEqual(p.to_payload()["w"], 50)
 
     def test_pilot_payload_contains_only_provided_fields(self):
         p = Pilot.from_json({"state": True, "temp": 3000, "rssi": -50, "mac": "AA:BB:CC:DD:EE:FF"})

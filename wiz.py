@@ -497,6 +497,7 @@ class Pilot():
         self.r: int = 0
         self.g: int = 0
         self.b: int = 0
+        self.c: int = 0
         self.w: int = 0
         self.dimming: int = 0
 
@@ -532,6 +533,10 @@ class Pilot():
         if "b" in json_data:
             pilot.b = json_data["b"]
             pilot._provided_fields.add("b")
+
+        if "c" in json_data:
+            pilot.c = json_data["c"]
+            pilot._provided_fields.add("c")
 
         if "w" in json_data:
             pilot.w = json_data["w"]
@@ -632,6 +637,7 @@ class Pilot():
             "r": self.r,
             "g": self.g,
             "b": self.b,
+            "c": self.c,
             "w": self.w,
             "dimming": self.dimming,
             "sceneId": self.sceneId,
@@ -644,7 +650,7 @@ class Pilot():
         """Return only the fields that were explicitly provided, suitable for setPilot payloads."""
 
         payload = {}
-        for key in ["state", "temp", "r", "g", "b", "w", "dimming", "sceneId", "speed"]:
+        for key in ["state", "temp", "r", "g", "b", "c", "w", "dimming", "sceneId", "speed"]:
             if key in self._provided_fields:
                 payload[key] = getattr(self, key)
 
@@ -661,7 +667,7 @@ class Pilot():
         return self.to_dict() == second.to_dict()
 
     def __str__(self):
-        return f"Pilot(state={self.state}, temp={self.temp}, r={self.r}, g={self.g}, b={self.b}, w={self.w}, dimming={self.dimming}, sceneId={self.sceneId}, speed={self.speed}, rssi={self.rssi}, mac={self.mac})"
+        return f"Pilot(state={self.state}, temp={self.temp}, r={self.r}, g={self.g}, b={self.b}, c={self.c}, w={self.w}, dimming={self.dimming}, sceneId={self.sceneId}, speed={self.speed}, rssi={self.rssi}, mac={self.mac})"
 
 
 class Power():
@@ -1003,7 +1009,7 @@ class WizDeviceController():
             self.commands["setPilot"] = {}
 
         for p in properties:
-            if p not in ["state", "temp", "r", "g", "b", "dimming", "sceneId", "speed"]:
+            if p not in ["state", "temp", "r", "g", "b", "c", "w", "dimming", "sceneId", "speed"]:
                 continue
             if p in ["temp", "speed", "dimming", "sceneId"] and properties[p] == 0:
                 continue
@@ -1026,9 +1032,14 @@ class WizDeviceController():
         self.setPilot(properties={"dimming": dimming})
         return self
 
-    def withColor(self, red: int = 0, green: int = 0, blue: int = 0, white: int = 0) -> 'WizDeviceController':
+    def withColor(self, red: int = 0, green: int = 0, blue: int = 0) -> 'WizDeviceController':
 
-        self.setPilot(properties={"r": red, "g": green, "b": blue, "w": white})
+        self.setPilot(properties={"r": red, "g": green, "b": blue})
+        return self
+
+    def withWhite(self, cold: int, warm: int) -> 'WizDeviceController':
+
+        self.setPilot(properties={"c": cold, "w": warm})
         return self
 
     def withScene(self, scene: str) -> 'WizDeviceController':
@@ -1459,7 +1470,7 @@ class Program():
         duration_of_step = max(next_step, current_step + 1) - current_step
         progress_in_step = time_ - current_step / self._time_factor
 
-        interpolable_keys = ["r", "g", "b", "w", "dimming", "temp"]
+        interpolable_keys = ["r", "g", "b", "c", "w", "dimming", "temp"]
         interpolated_values = {}
 
         for key in interpolable_keys:
@@ -1810,14 +1821,20 @@ class WizDeviceCLI():
             _ACTION: lambda controller, params: controller.withDimming(dimming=params[0]),
         },
         "color": {
-            _USAGE: "--color <red> <green> <blue> [<shite>]",
+            _USAGE: "--color <red> <green> <blue>",
             _DESCR: "set color, each value 0 - 255",
-            _REGEX: r"^%s %s %s( %s)?$" % (_REG_255, _REG_255, _REG_255, _REG_255),
-            _TYPES: [int, int, int, int],
+            _REGEX: r"^%s %s %s$" % (_REG_255, _REG_255, _REG_255),
+            _TYPES: [int, int, int],
             _ACTION: lambda controller, params: controller.withColor(
-                red=params[0], green=params[1], blue=params[2], white=params[3] if len(
-                    params) == 4 else 0
+                red=params[0], green=params[1], blue=params[2]
             ),
+        },
+        "white": {
+            _USAGE: "--white <cold> <warm>",
+            _DESCR: "set cold-white (c) and warm-white (w) levels, each value 0 - 255",
+            _REGEX: r"^%s %s$" % (_REG_255, _REG_255),
+            _TYPES: [int, int],
+            _ACTION: lambda controller, params: controller.withWhite(cold=params[0], warm=params[1]),
         },
         "scene": {
             _USAGE: "--scene <id/name>",
@@ -2061,6 +2078,7 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
         help += self._build_help(command="temp")
         help += self._build_help(command="dimming")
         help += self._build_help(command="color")
+        help += self._build_help(command="white")
 
         help += "\n\nSet scene:"
         help += self._build_help(command="scene")
@@ -2121,6 +2139,10 @@ USAGE:   wiz.py <ip_1/alias_1> [<ip_2/alias_2>] ... --<command_1> [<param_1> <pa
             elif device.pilot.r:
                 print(
                     f"    Color:               {device.pilot.color_str()}")
+
+            if device.pilot.w or device.pilot.c:
+                print(f"    Cold white (c):      {device.pilot.c}")
+                print(f"    Warm white (w):      {device.pilot.w}")
 
             if device.pilot.sceneId:
                 print(
