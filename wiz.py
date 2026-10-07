@@ -1277,11 +1277,11 @@ class Program():
             _END: {"state": False, "dimming": 10}
         },
         PROGRAM_WAKEUP: {
-            _BEGIN: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
-            16: {"r": 0, "g": 0, "b": 20, "w": 0, "dimming": 20},
-            24: {"r": 0, "g": 60, "b": 255, "w": 0, "dimming": 60},
-            59: {"r": 255, "g": 255, "b": 255, "w": 50, "dimming": 100},
-            60: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 10},
+            _BEGIN: {"r": 0, "g": 0, "b": 0, "w": 0, "c": 0, "dimming": 10},
+            15: {"r": 255, "g": 31, "b": 31, "w": 0, "c": 0, "dimming": 15},
+            25: {"r": 255, "g": 31, "b": 31, "w": 0, "c": 7, "dimming": 30},
+            30: {"sceneId": 9},
+            60: {"r": 0, "g": 0, "b": 0, "w": 0, "dimming": 0},
             _END: {"state": False, "r": 0, "g": 0,
                    "b": 0, "w": 0, "dimming": 10}
         },
@@ -1442,6 +1442,7 @@ class Program():
             programID, {}).copy()
         max_time: int = max(max(self._current_program.keys()), 1)
         self._time_factor: float = max_time / duration
+        self._last_step: int = Program._BEGIN
 
         self.wizController: WizDeviceController = wizController
         self._last_pilots: dict[int, Pilot] = {}
@@ -1449,7 +1450,8 @@ class Program():
 
     def reset(self) -> None:
 
-        self._time = Program._BEGINelapsed
+        self._time = Program._BEGIN
+        self._last_step: int = Program._BEGIN
 
     def get_pilot(self, time_: int, device_index: int = 0) -> Pilot:
 
@@ -1460,6 +1462,10 @@ class Program():
         current_step, next_step = self._get_step(effective_time)
         if effective_time <= 0 or effective_time >= self.duration:
             return Pilot.from_json(self._current_program[current_step]) if current_step is not None else None
+
+        if current_step != self._last_step:
+            self._last_step = current_step
+            return Pilot.from_json(self._current_program[current_step]) 
 
         pilot = self.interpolate(effective_time, current_step, next_step)
 
@@ -1483,8 +1489,7 @@ class Program():
             start_value = self._current_program[current_step].get(key, 0)
             end_value = self._current_program[next_step].get(
                 key, 0) if next_step is not None else start_value
-            interpolated_value = int(start_value + (end_value - start_value) * (
-                progress_in_step / duration_of_step) * self._time_factor)
+            interpolated_value = int(start_value + (end_value - start_value) * progress_in_step * self._time_factor / duration_of_step)
 
             if key == "dimming":
                 interpolated_value = int((interpolated_value + 5) // 10 * 10)

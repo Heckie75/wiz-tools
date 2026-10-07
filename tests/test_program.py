@@ -50,32 +50,44 @@ class TestProgram(unittest.TestCase):
         self.assertEqual(p.state, False)
 
         p = program.get_pilot(8)
-        self.assertEqual(p.b, 10)
+        self.assertEqual(p.r, 136)
+        self.assertEqual(p.g, 16)
+        self.assertEqual(p.b, 16)
+        self.assertEqual(p.dimming, 10)
 
         p = program.get_pilot(16)
-        self.assertEqual(p.b, 20)
+        self.assertEqual(p.r, 255)
+        self.assertEqual(p.g, 31)
+        self.assertEqual(p.b, 31)
+        self.assertEqual(p.dimming, 15)
 
         p = program.get_pilot(20)
-        self.assertEqual(p.g, 30)
-        self.assertEqual(p.b, 137)
-        self.assertEqual(p.dimming, 40)
+        self.assertEqual(p.r, 255)
+        self.assertEqual(p.g, 31)
+        self.assertEqual(p.b, 31)
+        self.assertEqual(p.c, 3)
+        self.assertEqual(p.dimming, 20)
 
         p = program.get_pilot(24)
-        self.assertEqual(p.g, 60)
-        self.assertEqual(p.b, 255)
-        self.assertEqual(p.dimming, 60)
+        self.assertEqual(p.r, 255)
+        self.assertEqual(p.g, 31)
+        self.assertEqual(p.b, 31)
+        self.assertEqual(p.c, 6)
+        self.assertEqual(p.dimming, 30)
 
         p = program.get_pilot(40)
-        self.assertEqual(p.r, 116)
-        self.assertEqual(p.g, 149)
-        self.assertEqual(p.b, 255)
-        self.assertEqual(p.dimming, 80)
+        self.assertEqual(p.r, 0)
+        self.assertEqual(p.g, 0)
+        self.assertEqual(p.b, 0)
+        self.assertEqual(p.sceneId, 9)
+        self.assertEqual(p.dimming, 0)
 
         p = program.get_pilot(59)
-        self.assertEqual(p.r, 255)
-        self.assertEqual(p.g, 255)
-        self.assertEqual(p.b, 255)
-        self.assertEqual(p.dimming, 100)
+        self.assertEqual(p.r, 0)
+        self.assertEqual(p.g, 0)
+        self.assertEqual(p.b, 0)
+        self.assertEqual(p.sceneId, 9)
+        self.assertEqual(p.dimming, 0)
 
     def test_interpolate_cold_and_warm_white_channels(self):
         program = Program(FakeController(ip_addresses=[]), Program.PROGRAM_INTERVAL, duration=1)
@@ -113,8 +125,11 @@ class TestProgram(unittest.TestCase):
         second = program.get_pilot(0, device_index=1)
         reference = program.get_pilot(33, device_index=0)
 
-        self.assertEqual(second.to_dict(), reference.to_dict())
         self.assertEqual(first.b, 255)
+        self.assertEqual(second.g, 255)
+        self.assertEqual(second.b, 255)
+        self.assertEqual(reference.g, 255)
+        self.assertNotEqual(second.to_dict(), reference.to_dict())
 
     def test_run_program_sends_new_pilot_only_when_changed(self):
 

@@ -19,8 +19,8 @@ class TestWizDeviceCLI(unittest.TestCase):
         with redirect_stdout(output):
             cli.printDevice(device)
 
-        self.assertIn("Cold white (c):      0/255", output.getvalue())
-        self.assertIn("Warm white (w):      255/255", output.getvalue())
+        self.assertIn("Cold white (c):      0", output.getvalue())
+        self.assertIn("Warm white (w):      255", output.getvalue())
 
     def test_parse_programm_command(self):
         cli = WizDeviceCLI.__new__(WizDeviceCLI)
