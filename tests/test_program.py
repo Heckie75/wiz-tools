@@ -126,10 +126,54 @@ class TestProgram(unittest.TestCase):
         reference = program.get_pilot(33, device_index=0)
 
         self.assertEqual(first.b, 255)
-        self.assertEqual(second.g, 255)
-        self.assertEqual(second.b, 255)
-        self.assertEqual(reference.g, 255)
-        self.assertNotEqual(second.to_dict(), reference.to_dict())
+        self.assertEqual(second.to_dict(), reference.to_dict())
+        self.assertNotEqual(first.to_dict(), second.to_dict())
+
+    def test_program_manages_controller_ip_addresses(self):
+        controller = FakeController(ip_addresses=["192.168.1.100"])
+        program = Program(controller, Program.PROGRAM_INTERVAL, 100)
+
+        self.assertIs(program.ip_addresses, controller.ip_addresses)
+        self.assertTrue(program.has_ip_address("192.168.1.100"))
+        self.assertFalse(program.has_ip_address("192.168.1.101"))
+
+        program.add_ip_addresses(["192.168.1.101", "192.168.1.101"])
+        self.assertEqual(program.ip_addresses, [
+            "192.168.1.100", "192.168.1.101"])
+
+        program.remove_ip_address("192.168.1.100")
+        program.remove_ip_address("192.168.1.102")
+        self.assertEqual(program.ip_addresses, ["192.168.1.101"])
+
+    def test_adding_device_rebalances_infinite_program(self):
+        controller = FakeController(ip_addresses=[
+            "192.168.1.100", "192.168.1.101"])
+        program = Program(controller, Program.PROGRAM_INFINITE, 100, phase_shift=50)
+        program._last_step = 16
+        program._last_pilots[0] = Pilot.from_json({"state": True})
+
+        with patch.object(program, "initialize", wraps=program.initialize) as initialize:
+            program.add_ip_addresses(["192.168.1.102", "192.168.1.102"])
+
+        self.assertEqual(program.ip_addresses, [
+            "192.168.1.100", "192.168.1.101", "192.168.1.102"])
+        self.assertEqual(program.phase_shift, 33)
+        self.assertEqual(program._last_pilots, {})
+        self.assertEqual(program._last_step, Program._BEGIN)
+        initialize.assert_called_once_with()
+
+    def test_infinite_pilot_sampling_does_not_share_step_state(self):
+        controller = FakeController(ip_addresses=[
+            "192.168.1.100", "192.168.1.101"])
+        program = Program(controller, Program.PROGRAM_INFINITE, 360, phase_shift=60)
+        program._last_step = 16
+
+        first = program.get_pilot(0, device_index=0)
+        second = program.get_pilot(0, device_index=1)
+
+        self.assertEqual(program._last_step, 16)
+        self.assertEqual(first.b, 255)
+        self.assertEqual(second.to_dict(), program.get_pilot(60).to_dict())
 
     def test_run_program_sends_new_pilot_only_when_changed(self):
 

@@ -1448,6 +1448,33 @@ class Program():
         self._last_pilots: dict[int, Pilot] = {}
         self._initial_pilot = currentPilot
 
+    @property
+    def ip_addresses(self) -> list[str]:
+
+        return self.wizController.ip_addresses
+
+    def has_ip_address(self, ip_address: str) -> bool:
+
+        return ip_address in self.ip_addresses
+
+    def add_ip_addresses(self, ip_addresses: list[str]) -> None:
+
+        previous_count = len(self.ip_addresses)
+        for ip_address in ip_addresses:
+            if not self.has_ip_address(ip_address):
+                self.ip_addresses.append(ip_address)
+
+        if self.programID == Program.PROGRAM_INFINITE and len(self.ip_addresses) > previous_count:
+            self.phase_shift = self.duration // len(self.ip_addresses)
+            self._last_pilots.clear()
+            self.reset()
+            self.initialize()
+
+    def remove_ip_address(self, ip_address: str) -> None:
+
+        if self.has_ip_address(ip_address):
+            self.ip_addresses.remove(ip_address)
+
     def reset(self) -> None:
 
         self._time = Program._BEGIN
@@ -1463,7 +1490,7 @@ class Program():
         if effective_time <= 0 or effective_time >= self.duration:
             return Pilot.from_json(self._current_program[current_step]) if current_step is not None else None
 
-        if current_step != self._last_step:
+        if self.programID != Program.PROGRAM_INFINITE and current_step != self._last_step:
             self._last_step = current_step
             return Pilot.from_json(self._current_program[current_step]) 
 

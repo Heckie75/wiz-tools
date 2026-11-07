@@ -50,6 +50,15 @@ When running a program across several devices, you can add a phase shift to crea
 
 In the first example, the second device starts 30 seconds ahead and so on. In the second, each device is offset by one third of the 10-minute runtime.
 
+When managing a `Program` from Python, its device list can be changed while it is running:
+
+```python
+program.add_ip_addresses(["192.168.178.36"])
+program.remove_ip_address("192.168.178.33")
+```
+
+Adding a new device to an infinite program recalculates the phase shift using the updated device count and reinitializes the program. Adding an address that is already present has no effect.
+
 ## Combining commands
 
 Multiple commands can be combined in a single call. The tool will execute them in the order provided.
@@ -176,6 +185,7 @@ This would match both `living-room` and `bedroom` if those aliases exist in `~/.
 ## Recent changes
 
 - Added `auto` phase shifting to distribute a program evenly across multiple devices.
+- Program instances can add or remove device IP addresses at runtime; adding a device to an infinite program recalculates its phase shift and reinitializes it.
 
 ## License
 
